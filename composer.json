@@ -1,0 +1,13 @@
+{
+    "name": "mailgate/mailgate",
+    "description": "Shared mailbox monitor and notification system",
+    "type": "project",
+    "require": {
+        "php": "^8.3",
+        "php-mime-mail-parser/php-mime-mail-parser": "^8.0",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

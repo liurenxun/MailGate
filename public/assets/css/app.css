@@ -1,0 +1,98 @@
+/* ──────────────────────────────────────────────────────────────────
+   MailGate — Custom Styles
+   ────────────────────────────────────────────────────────────────── */
+
+/* ── 共通 ──────────────────────────────────────────────────────── */
+body {
+    font-size: 0.9rem;
+}
+
+.container-fluid {
+    max-width: 1400px;
+}
+
+/* ── ダッシュボード ─────────────────────────────────────────────── */
+
+/* 未読通知行 */
+.notif-unread {
+    background-color: #eef4ff;
+    font-weight: 600;
+}
+.notif-unread:hover {
+    background-color: #ddeaff;
+}
+.notif-read {
+    color: #6c757d;
+}
+
+/* 通知リストのテーブル */
+.notif-table td {
+    vertical-align: middle;
+}
+.notif-table .notif-subject {
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* メールボックス サイドバー */
+.mailbox-sidebar .list-group-item {
+    border-radius: 0;
+    border-left: 3px solid transparent;
+    font-size: 0.85rem;
+}
+.mailbox-sidebar .list-group-item.active {
+    background-color: #e9f0ff;
+    border-left-color: #0d6efd;
+    color: #0d6efd;
+    font-weight: 600;
+}
+.mailbox-sidebar .list-group-item:not(.active):hover {
+    background-color: #f8f9fa;
+}
+
+/* ── メール詳細 ─────────────────────────────────────────────────── */
+
+.mail-header-table th {
+    width: 90px;
+    color: #6c757d;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+/* HTML メール iframe（sandbox="" でスクリプト完全無効化, S1） */
+.mail-iframe {
+    width: 100%;
+    min-height: 480px;
+    border: none;
+    background: #fff;
+}
+
+/* ── ルール管理 ─────────────────────────────────────────────────── */
+
+.rule-action-notify  { color: #0d6efd; }
+.rule-action-ignore  { color: #dc3545; }
+
+/* ── ユーティリティ ─────────────────────────────────────────────── */
+
+/* フラッシュメッセージ自動フェード */
+.alert-autofade {
+    animation: autofade 4s forwards;
+}
+@keyframes autofade {
+    0%   { opacity: 1; }
+    70%  { opacity: 1; }
+    100% { opacity: 0; pointer-events: none; }
+}
+
+/* カードのサブタイトル */
+.card-subtitle-sm {
+    font-size: 0.78rem;
+    color: #6c757d;
+}
+
+/* 検索バー幅 */
+.search-form {
+    max-width: 320px;
+}

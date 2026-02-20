@@ -1,0 +1,50 @@
+<?php
+/**
+ * MailGate 配置文件模板
+ *
+ * 使用方法：
+ *   cp config/config.example.php config/config.php
+ *   然后修改 config/config.php 中的实际值
+ *
+ * config/config.php 已加入 .gitignore，不会被提交到版本库。
+ */
+return [
+
+    // ──────────────────────────────────────────────
+    // 数据库
+    // ──────────────────────────────────────────────
+    'db' => [
+        'host'     => 'localhost',
+        'dbname'   => 'mailgate',
+        'user'     => 'mailgate_user',
+        'password' => 'your_db_password',
+        'charset'  => 'utf8mb4',
+    ],
+
+    // ──────────────────────────────────────────────
+    // 加密密钥（AES-256-CBC）
+    // 生成命令：php -r "echo bin2hex(random_bytes(32)) . PHP_EOL;"
+    // 请使用 64 位十六进制字符串（32 字节）
+    // 警告：部署后切勿更换密钥，否则无法解密已存储的 IMAP/SMTP 密码
+    // ──────────────────────────────────────────────
+    'encryption_key' => 'your_64_hex_char_key_here_replace_this_value',
+
+    // ──────────────────────────────────────────────
+    // Web 基础 URL（不含末尾斜杠）
+    // 用于生成邮件中的链接
+    // ──────────────────────────────────────────────
+    'base_url' => 'https://your-domain.com/mailgate',
+
+    // ──────────────────────────────────────────────
+    // Session Cookie 安全设置
+    // 生产环境建议 secure=true（需要 HTTPS）
+    // 本地开发无 HTTPS 时可设为 false
+    // ──────────────────────────────────────────────
+    'session_secure' => true,
+
+    // ──────────────────────────────────────────────
+    // 应用名称（显示在页面和通知邮件中）
+    // ──────────────────────────────────────────────
+    'app_name' => 'MailGate',
+
+];

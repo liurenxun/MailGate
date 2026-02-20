@@ -1,0 +1,21 @@
+# MailGate — Apache 設定
+
+# PHP エラーを非表示（本番環境）
+php_flag display_errors Off
+php_flag log_errors On
+
+# デフォルトページ
+DirectoryIndex index.php
+
+# ディレクトリ一覧を無効化
+Options -Indexes
+
+# src/ / config/ / sql/ / storage/ への直接アクセス阻止
+# （これらは public/ の外にあるため Apache の DocumentRoot 外）
+
+# セキュリティヘッダー
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

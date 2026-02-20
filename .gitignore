@@ -1,0 +1,22 @@
+# 配置文件（含数据库密码、加密密钥，禁止入库）
+config/config.php
+
+# 附件存储目录内容
+storage/attachments/*
+!storage/attachments/.gitkeep
+
+# Composer 依赖
+vendor/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 日志
+*.log
+/tmp/

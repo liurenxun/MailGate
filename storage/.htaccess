@@ -1,0 +1,3 @@
+# 禁止 Apache 直接访问 storage/ 目录
+# 附件通过 PHP 鉴权后 readfile() 输出（不通过 Web Server 直接访问）
+Deny from all
