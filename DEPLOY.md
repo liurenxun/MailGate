@@ -52,17 +52,17 @@
 # SSH 登录服务器
 ssh username@sv*****.xserver.jp
 
-# 进入域名目录（根据实际路径调整）
+# 进入域名目录
 cd ~/onestep-t.co.jp/public_html
 
-# 克隆仓库到 mailgate/ 子目录
-git clone https://github.com/your-org/MailGate.git mailgate
+# 克隆仓库到子域名目录
+git clone https://github.com/your-org/MailGate.git mailgate.onestep-t.co.jp
 ```
 
 后续更新时：
 
 ```bash
-cd ~/onestep-t.co.jp/public_html/mailgate
+cd ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp
 git pull origin main
 ```
 
@@ -92,7 +92,7 @@ ssh username@sv*****.xserver.jp
 cd ~/onestep-t.co.jp/public_html
 
 unzip mailgate.zip
-mv MailGate-main mailgate   # GitHub 下载的 zip 解压后目录名含分支名，按实际调整
+mv MailGate-main mailgate.onestep-t.co.jp   # GitHub 下载的 zip 解压后目录名含分支名，按实际调整
 rm mailgate.zip
 ```
 
@@ -100,17 +100,19 @@ rm mailgate.zip
 
 ```
 ~/onestep-t.co.jp/public_html/
-├── .htaccess          ← WordPress（原有，勿动）
-├── index.php          ← WordPress（原有，勿动）
+├── .htaccess                        ← WordPress（原有，勿动）
+├── index.php                        ← WordPress（原有，勿动）
 ├── wp-admin/
 ├── wp-content/
-└── mailgate/          ← 本项目根目录
+└── mailgate.onestep-t.co.jp/       ← 本项目根目录（子域名 DocumentRoot）
+    ├── .htaccess                    ← 重写规则：将请求转发到 public/
     ├── cron/
-    ├── public/        ← Web 根目录（PHP/CSS/JS 文件）
+    ├── public/                      ← 实际响应 HTTP 请求的目录
+    │   └── .htaccess                ← 安全响应头等
     ├── sql/
     ├── src/
     ├── storage/
-    ├── config/        ← config.php 需手动创建，不含于 Git
+    ├── config/                      ← config.php 需手动创建，不含于 Git
     ├── composer.json
     └── setup-admin.php
 ```
@@ -162,25 +164,38 @@ RewriteRule ^(.*)$ public/$1 [L]
 
 ---
 
-#### 方案 B：子域名部署（`mailgate.onestep-t.co.jp`）
+#### 方案 B：子域名部署（`mailgate.onestep-t.co.jp`）※ 当前采用方案
 
-在 Xserver 控制面板新增子域名，将 DocumentRoot 指向 `mailgate/public/`，
-然后在 `public/` 目录下创建 `.htaccess`：
+Xserver 控制面板新增子域名后，会自动创建 `public_html/mailgate.onestep-t.co.jp/` 目录，
+将项目文件上传至该目录（即子域名 DocumentRoot = 项目根目录）。
+
+在**项目根目录**创建 `.htaccess`：
 
 ```bash
-vi ~/onestep-t.co.jp/public_html/mailgate/public/.htaccess
+vi ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/.htaccess
 ```
 
 写入：
 
 ```apache
-# PHP 版本切换为 8.3
+# PHP バージョンを 8.3 に切り替え
 <FilesMatch "\.php$">
     SetHandler application/x-httpd-php83
 </FilesMatch>
 
 Options -Indexes
+
+RewriteEngine On
+
+# config/src/sql/cron/vendor/storage への直接アクセス禁止
+RewriteRule ^(config|src|sql|cron|vendor|storage)(/|$) - [F,L]
+
+# すべてのリクエストを public/ に転送
+RewriteRule ^public/ - [L]
+RewriteRule ^(.*)$ public/$1 [L]
 ```
+
+`public/.htaccess`（プロジェクトに同梱済み）は安全ヘッダーのみ担当。
 
 访问地址：`https://mailgate.onestep-t.co.jp/`
 `config.php` 中 `base_url` 填写：`https://mailgate.onestep-t.co.jp`
@@ -192,7 +207,7 @@ Options -Indexes
 ```bash
 # 访问以下 URL，若返回 403 则配置正确
 curl -o /dev/null -s -w "%{http_code}\n" \
-  https://onestep-t.co.jp/mailgate/config/config.php
+  https://mailgate.onestep-t.co.jp/config/config.php
 # 预期输出：403
 ```
 
@@ -201,7 +216,7 @@ curl -o /dev/null -s -w "%{http_code}\n" \
 ## 4. 安装 Composer 依赖
 
 ```bash
-cd ~/onestep-t.co.jp/public_html/mailgate
+cd ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp
 /usr/bin/php8.3 /usr/bin/composer install --no-dev --optimize-autoloader
 ```
 
@@ -228,7 +243,7 @@ FLUSH PRIVILEGES;
 
 ```bash
 mysql -u mailgate_user -p mailgate \
-  < ~/onestep-t.co.jp/public_html/mailgate/sql/schema.sql
+  < ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/sql/schema.sql
 ```
 
 或在 phpMyAdmin 中选择 `mailgate` 数据库 → 导入 → 选择 `sql/schema.sql`。
@@ -238,8 +253,8 @@ mysql -u mailgate_user -p mailgate \
 ## 6. 创建配置文件
 
 ```bash
-cp ~/onestep-t.co.jp/public_html/mailgate/config/config.example.php \
-   ~/onestep-t.co.jp/public_html/mailgate/config/config.php
+cp ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/config/config.example.php \
+   ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/config/config.php
 ```
 
 用编辑器打开 `config/config.php`，填写以下内容：
@@ -263,9 +278,7 @@ return [
     'encryption_key' => '在此填入64位十六进制字符串',
 
     // Web 访问地址（不含末尾斜杠）
-    // 子目录部署：'https://onestep-t.co.jp/mailgate'
-    // 子域名部署：'https://mailgate.onestep-t.co.jp'
-    'base_url' => 'https://your-domain.com',
+    'base_url' => 'https://mailgate.onestep-t.co.jp',
 
     // 生产环境必须为 true（依赖 HTTPS）
     'session_secure' => true,
@@ -291,8 +304,8 @@ return [
 Cron 脚本和 Web 进程需要写入 `storage/attachments/`：
 
 ```bash
-chmod 755 ~/onestep-t.co.jp/public_html/mailgate/storage
-chmod 755 ~/onestep-t.co.jp/public_html/mailgate/storage/attachments
+chmod 755 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/storage
+chmod 755 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/storage/attachments
 ```
 
 确认 Web 用户（通常是 `www-data` 或 `nobody`）对该目录有写权限。在 Xserver 上通常无需额外操作，PHP 以当前用户权限运行。
@@ -307,10 +320,12 @@ chmod 755 ~/onestep-t.co.jp/public_html/mailgate/storage/attachments
 
 1. 「サーバー管理」→「ドメイン設定」→「子ドメイン追加」
 2. 子域名：`mailgate`（完整地址 `mailgate.onestep-t.co.jp`）
-3. 文档根目录设为：`/home/{user}/onestep-t.co.jp/public_html/mailgate/public`
+3. 文档根目录设为（Xserver 通常自动生成）：`/home/{user}/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp`
 4. PHP バージョン設定 → 选择 **PHP 8.3**（子域名可单独设置，此时第 3 步的 `.htaccess` PHP 切换也可省略）
 
-**验证：** 访问 `https://your-domain.com` 应显示登录页，访问 `https://your-domain.com/../config/config.php` 应返回 403。
+> DocumentRoot 指向**项目根目录**（不含 `/public`），由根目录的 `.htaccess` 负责将请求转发到 `public/`。
+
+**验证：** 访问 `https://mailgate.onestep-t.co.jp` 应显示登录页，访问 `https://mailgate.onestep-t.co.jp/config/config.php` 应返回 403。
 
 ---
 
@@ -321,7 +336,7 @@ chmod 755 ~/onestep-t.co.jp/public_html/mailgate/storage/attachments
 > 或先跳过此步，待 SMTP 配置完成后再执行。
 
 ```bash
-/usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
+/usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 ```
 
 按提示输入管理员姓名和邮箱。脚本会向该邮箱发送设密邮件。
@@ -331,7 +346,7 @@ chmod 755 ~/onestep-t.co.jp/public_html/mailgate/storage/attachments
 完成后立即删除脚本（安全要求）：
 
 ```bash
-rm ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
+rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 ```
 
 ---
@@ -344,13 +359,13 @@ rm ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
 2. 添加以下任务（每 5 分钟执行一次）：
 
 ```
-*/5 * * * * /usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate/cron/fetch.php >> ~/logs/mailgate.log 2>&1
+*/5 * * * * /usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/cron/fetch.php >> ~/logs/mailgate.log 2>&1
 ```
 
 **手动测试 Cron 脚本：**
 
 ```bash
-/usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate/cron/fetch.php
+/usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/cron/fetch.php
 ```
 
 正常输出示例：
@@ -368,7 +383,7 @@ rm ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
 
 ## 11. 登录后台完成 SMTP 配置
 
-访问 `https://your-domain.com`，用管理员账号登录后：
+访问 `https://mailgate.onestep-t.co.jp`，用管理员账号登录后：
 
 ### 11-1. 配置 SMTP 发信
 
@@ -413,7 +428,7 @@ rm ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
 
 部署完成后逐项验证：
 
-- [ ] 访问 `https://your-domain.com` 显示登录页
+- [ ] 访问 `https://mailgate.onestep-t.co.jp` 显示登录页
 - [ ] `config/config.php` 直接访问返回 403
 - [ ] PHP 版本确认为 8.3（可在登录后的管理页面或通过 `phpinfo()` 临时文件确认）
 - [ ] 管理员可正常登录
@@ -438,10 +453,10 @@ rm ~/onestep-t.co.jp/public_html/mailgate/setup-admin.php
 **Q: 页面显示 PHP 语法错误（PHP 7.4 特有）**
 - 说明 `.htaccess` 的 PHP 8.3 切换未生效
 - 确认 `SetHandler application/x-httpd-php83` 写法正确
-- 用 `curl -I https://your-domain.com` 查看 `X-Powered-By` 响应头确认版本
+- 用 `curl -I https://mailgate.onestep-t.co.jp` 查看 `X-Powered-By` 响应头确认版本
 
-**Q: 访问 `/mailgate/` 返回 404**
-- 检查 `mailgate/.htaccess` 中 `RewriteBase` 是否与实际目录名一致
+**Q: 访问子域名返回 404 或目录列表**
+- 检查项目根目录的 `.htaccess` 中 `RewriteEngine On` 是否存在
 - 确认 `mod_rewrite` 已启用（Xserver 默认启用）
 
 **Q: 设密邮件/通知邮件收不到**
