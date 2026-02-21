@@ -160,7 +160,7 @@ class Fetcher
             return null;
         }
 
-        if (class_exists('PhpMimeMailParser\Parser')) {
+        if (class_exists('ZBateson\MailMimeParser\Message')) {
             return $this->parseWithMimeParser($uid, $raw);
         }
 
@@ -172,20 +172,19 @@ class Fetcher
 
     private function parseWithMimeParser(int $uid, string $raw): ?array
     {
-        $parser = new \PhpMimeMailParser\Parser();
-        $parser->setText($raw);
+        $message = \ZBateson\MailMimeParser\Message::from($raw, false);
 
-        $messageId   = $this->cleanHeader($parser->getHeader('message-id') ?: '') ?: null;
-        $fromHeader  = $parser->getHeader('from') ?: '';
-        $fromAddress = Helpers::extractEmail($fromHeader);
-        $fromName    = $this->extractDisplayName($fromHeader);
-        $subject     = $this->decodeHeader($parser->getHeader('subject') ?: '');
-        $toAddress   = $parser->getHeader('to') ?: null;
-        $cc          = $parser->getHeader('cc') ?: null;
-        $receivedAt  = $this->parseDate($parser->getHeader('date') ?: '');
+        $messageId   = $this->cleanHeader($message->getMessageId() ?: '') ?: null;
+        $fromHeader  = $message->getHeader('from');
+        $fromAddress = $fromHeader ? ($fromHeader->getEmail() ?: '') : '';
+        $fromName    = $fromHeader ? ($fromHeader->getPersonName() ?: $fromAddress) : $fromAddress;
+        $subject     = $message->getSubject() ?: '';
+        $toAddress   = $message->getHeaderValue('to') ?: null;
+        $cc          = $message->getHeaderValue('cc') ?: null;
+        $receivedAt  = $this->parseDate($message->getHeaderValue('date') ?: '');
 
-        $bodyText = $this->truncateBody($parser->getMessageBody('text') ?: '');
-        $bodyHtml = $this->truncateBody($parser->getMessageBody('html') ?: '', 5 * 1024 * 1024);
+        $bodyText = $this->truncateBody($message->getTextContent() ?: '');
+        $bodyHtml = $this->truncateBody($message->getHtmlContent() ?: '', 5 * 1024 * 1024);
 
         $pdo  = Database::get();
         $stmt = $pdo->prepare(
@@ -213,7 +212,7 @@ class Fetcher
         }
 
         $mailId = Database::lastInsertId();
-        $this->storeAttachments($parser, $mailId);
+        $this->storeAttachments($message, $mailId);
 
         return Database::fetchOne('SELECT * FROM mails WHERE id = ?', [$mailId]);
     }
@@ -265,7 +264,7 @@ class Fetcher
 
     // ──── 附件存储 ────────────────────────────────────────────────
 
-    private function storeAttachments(\PhpMimeMailParser\Parser $parser, int $mailId): void
+    private function storeAttachments(\ZBateson\MailMimeParser\Message $message, int $mailId): void
     {
         $storageBase = dirname(__DIR__)
             . '/storage/attachments/'
@@ -273,12 +272,10 @@ class Fetcher
             . '/'
             . date('Y-m');
 
-        foreach ($parser->getAttachments() as $attachment) {
-            $content   = $attachment->getContent();
+        foreach ($message->getAllAttachmentParts() as $attachment) {
             $filename  = $attachment->getFilename() ?: 'attachment';
             $mimeType  = $attachment->getContentType() ?: 'application/octet-stream';
             $contentId = $attachment->getContentId() ?: null;
-            $size      = strlen($content);
 
             // S6: UUID 命名，禁止使用原始文件名生成路径
             $ext          = preg_replace('/[^a-zA-Z0-9]/', '', pathinfo($filename, PATHINFO_EXTENSION));
@@ -290,10 +287,15 @@ class Fetcher
                 mkdir($storageBase, 0750, true);
             }
 
-            if (file_put_contents($fullPath, $content) === false) {
-                error_log("MailGate: failed to write attachment: $fullPath");
+            // 使用 saveContent 写入二进制内容（避免 getContent() 的字符集转换影响二进制附件）
+            $handle = fopen($fullPath, 'wb');
+            if ($handle === false) {
+                error_log("MailGate: failed to open attachment for writing: $fullPath");
                 continue;
             }
+            $attachment->saveContent($handle);
+            $size = ftell($handle);
+            fclose($handle);
 
             Database::query(
                 'INSERT INTO attachments

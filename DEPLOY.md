@@ -215,15 +215,31 @@ curl -o /dev/null -s -w "%{http_code}\n" \
 
 ## 4. 安装 Composer 依赖
 
+> **注意：** Xserver 系统自带的 `/usr/bin/composer` 版本为 1.9.1（2019 年），过于陈旧，
+> 会导致 `phpmailer/phpmailer` 和 `zbateson/mail-mime-parser` 无法解析。
+> 必须在项目目录内下载最新版 `composer.phar` 来使用。
+
 ```bash
 cd ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp
-/usr/bin/php8.3 /usr/bin/composer install --no-dev --optimize-autoloader
+
+# 下载最新版 composer.phar
+/usr/bin/php8.3 -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+/usr/bin/php8.3 composer-setup.php
+/usr/bin/php8.3 -r "unlink('composer-setup.php');"
+
+# 用下载的 composer.phar 安装依赖
+/usr/bin/php8.3 composer.phar install --no-dev --optimize-autoloader
 ```
 
-> Xserver 上 `composer` 命令可能需要通过 PHP 调用，若 `composer` 不在 PATH 中，
-> 可先下载：`/usr/bin/php8.3 -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"`
+完成后会生成 `vendor/` 目录，包含 PHPMailer 和 zbateson/mail-mime-parser。
 
-完成后会生成 `vendor/` 目录，包含 PHPMailer 和 php-mime-mail-parser。
+> `zbateson/mail-mime-parser` 为纯 PHP 实现，无需安装任何 PECL 扩展（原 `php-mime-mail-parser` 需要 `mailparse` C 扩展，已替换）。
+
+`composer.phar` 无需纳入 Git 仓库：
+
+```bash
+echo "composer.phar" >> .gitignore
+```
 
 ---
 
@@ -471,6 +487,7 @@ rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 
 **Q: Cron 日志显示 `vendor/autoload.php not found`**
 - 未执行 `composer install`，按第 4 步操作
+- 注意必须使用项目目录内下载的 `composer.phar`，系统 `/usr/bin/composer`（1.9.1）版本过旧会导致安装失败
 
 **Q: 附件下载失败**
 - 检查 `storage/attachments/` 目录权限（需 PHP 用户可写）
