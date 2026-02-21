@@ -1,5 +1,10 @@
 # MailGate — Apache 設定
 
+# PHP バージョンを 8.3 に切り替え（ドメインデフォルト 7.4 を上書き）
+<FilesMatch "\.php$">
+    SetHandler application/x-httpd-php83
+</FilesMatch>
+
 # PHP エラーを非表示（本番環境）
 php_flag display_errors Off
 php_flag log_errors On
