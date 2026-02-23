@@ -169,11 +169,13 @@ CREATE TABLE IF NOT EXISTS `notifications` (
     `notified_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `email_sent_at`     DATETIME     NULL DEFAULT NULL,    -- NULL = 未发或发送失败
     `email_retry_count` TINYINT UNSIGNED NOT NULL DEFAULT 0, -- 超过 3 次不再重试 (F3)
+    `is_trashed`        TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    `trashed_at`        DATETIME         NULL     DEFAULT NULL,
 
     PRIMARY KEY (`id`),
     -- D3: 防止 Cron 重跑产生重复通知
     UNIQUE KEY `uq_notification`       (`mail_id`, `user_id`),
-    INDEX      `idx_notif_user_read`   (`user_id`, `is_read`),
+    INDEX      `idx_notif_user_read`   (`user_id`, `is_read`, `is_trashed`),
     -- Cron 重试查询索引：找出 email_sent_at IS NULL 且重试次数未达上限的记录
     INDEX      `idx_notif_retry`       (`email_sent_at`, `email_retry_count`),
     -- D4: 邮件删除时级联删除通知

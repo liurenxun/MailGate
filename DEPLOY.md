@@ -329,6 +329,20 @@ mysql -u mailgate_user -p mailgate \
 
 既にデプロイ済みの環境に対してアップデートを適用する場合は、以下の差分 SQL を phpMyAdmin または MySQL CLI で実行してください。
 
+### ゴミ箱機能（is_trashed / trashed_at カラム追加）
+
+```sql
+ALTER TABLE `notifications`
+    ADD COLUMN `is_trashed` TINYINT UNSIGNED NOT NULL DEFAULT 0
+        AFTER `email_retry_count`,
+    ADD COLUMN `trashed_at` DATETIME NULL DEFAULT NULL
+        AFTER `is_trashed`,
+    DROP INDEX `idx_notif_user_read`,
+    ADD INDEX `idx_notif_user_read` (`user_id`, `is_read`, `is_trashed`);
+```
+
+---
+
 ### rule_exclusions テーブル追加（システムルール Opt-out 機能）
 
 ```sql

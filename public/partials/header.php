@@ -21,13 +21,19 @@ $_appName = $_config['app_name'] ?? 'MailGate';
 $_unread = 0;
 if ($_user) {
     $_unread = (int)(Database::fetchOne(
-        'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = ? AND is_read = 0',
+        'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = ? AND is_read = 0 AND is_trashed = 0',
         [(int)$_user['id']]
     )['cnt'] ?? 0);
 }
 
 $_currentPage  = basename($_SERVER['PHP_SELF']);
 $_isAdminPage  = str_contains($_SERVER['PHP_SELF'], '/admin/');
+
+// アセットのキャッシュバスティング用タイムスタンプ
+$_assetVer = function(string $rel): string {
+    $abs = __DIR__ . '/../' . $rel;   // partials/ の親 = public/
+    return '/' . $rel . '?v=' . (file_exists($abs) ? filemtime($abs) : '0');
+};
 ?>
 <!DOCTYPE html>
 <html lang="ja">
@@ -35,9 +41,9 @@ $_isAdminPage  = str_contains($_SERVER['PHP_SELF'], '/admin/');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= Helpers::e($pageTitle ?? $_appName) ?> — <?= Helpers::e($_appName) ?></title>
-    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/assets/css/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="<?= $_assetVer('assets/css/bootstrap.min.css') ?>">
+    <link rel="stylesheet" href="<?= $_assetVer('assets/css/bootstrap-icons.min.css') ?>">
+    <link rel="stylesheet" href="<?= $_assetVer('assets/css/app.css') ?>">
 </head>
 <body class="bg-light">
 
