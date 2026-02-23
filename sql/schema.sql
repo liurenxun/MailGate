@@ -248,6 +248,23 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
         REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─────────────────────────────────────────────────────────────────
+-- rule_exclusions — ユーザーがオプトアウトしたグローバルルール
+-- ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `rule_exclusions` (
+    `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `rule_id`    INT UNSIGNED NOT NULL,
+    `user_id`    INT UNSIGNED NOT NULL,
+    `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_rule_exclusion` (`rule_id`, `user_id`),
+    INDEX `idx_excl_user_rule` (`user_id`, `rule_id`),
+    CONSTRAINT `fk_excl_rule` FOREIGN KEY (`rule_id`)
+        REFERENCES `rules` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_excl_user` FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ─────────────────────────────────────────────────────────────────

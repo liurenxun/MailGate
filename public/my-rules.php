@@ -91,6 +91,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success = 'ルールを削除しました。';
             }
         }
+
+        // ── グローバルルール適用トグル ──────────────────────────────────
+        if ($action === 'toggle_global_rule') {
+            $ruleId = (int)($_POST['rule_id'] ?? 0);
+
+            // S7: グローバルルールかつ自分が購読しているメールボックスのルールか検証
+            $rule = Database::fetchOne(
+                'SELECT r.id FROM rules r
+                 INNER JOIN subscriptions s ON s.mailbox_id = r.mailbox_id
+                 WHERE r.id = ? AND r.scope = ? AND s.user_id = ?',
+                [$ruleId, 'global', (int)$user['id']]
+            );
+
+            if (!$rule) {
+                $errors[] = '指定されたルールが見つかりません。';
+            } else {
+                $existing = Database::fetchOne(
+                    'SELECT id FROM rule_exclusions WHERE rule_id = ? AND user_id = ?',
+                    [$ruleId, (int)$user['id']]
+                );
+                if ($existing) {
+                    // OFF → ON: 除外を解除
+                    Database::query(
+                        'DELETE FROM rule_exclusions WHERE rule_id = ? AND user_id = ?',
+                        [$ruleId, (int)$user['id']]
+                    );
+                    $success = 'システムルールを有効にしました。';
+                } else {
+                    // ON → OFF: 除外を追加
+                    Database::query(
+                        'INSERT INTO rule_exclusions (rule_id, user_id) VALUES (?, ?)',
+                        [$ruleId, (int)$user['id']]
+                    );
+                    $success = 'システムルールを無効にしました。';
+                }
+            }
+        }
     }
 }
 
@@ -117,6 +154,26 @@ if (!empty($mailboxes)) {
     );
     foreach ($rows as $row) {
         $rulesByMailbox[$row['mailbox_id']][] = $row;
+    }
+}
+
+// ── 各メールボックスのグローバルルール一覧（除外状態付き）────────
+$globalRulesByMailbox = [];
+if (!empty($mailboxes)) {
+    $mbIds = array_column($mailboxes, 'id');
+    $in    = implode(',', array_fill(0, count($mbIds), '?'));
+    $rows  = Database::fetchAll(
+        "SELECT r.*,
+                CASE WHEN re.id IS NOT NULL THEN 1 ELSE 0 END AS excluded
+         FROM rules r
+         LEFT JOIN rule_exclusions re
+             ON re.rule_id = r.id AND re.user_id = ?
+         WHERE r.mailbox_id IN ({$in}) AND r.scope = 'global'
+         ORDER BY r.mailbox_id ASC, r.priority ASC, r.id ASC",
+        array_merge([(int)$user['id']], $mbIds)
+    );
+    foreach ($rows as $row) {
+        $globalRulesByMailbox[$row['mailbox_id']][] = $row;
     }
 }
 
@@ -159,7 +216,7 @@ include __DIR__ . '/partials/header.php';
     <strong>個人ルールについて：</strong>
     メールがルールに一致した場合、そのアクションが実行されます。
     優先度（小さい数ほど先に評価）順に判定し、一致したらそこで終了します。
-    一致しない場合は管理者が設定したグローバルルールが適用されます。
+    一致しない場合は、下記のシステムルールが評価されます（スイッチでオフにすると適用されません）。
 </div>
 
 <?php if (empty($mailboxes)): ?>
@@ -248,6 +305,71 @@ include __DIR__ . '/partials/header.php';
                         </tbody>
                     </table>
                 </div>
+                <?php endif; ?>
+
+                <!-- システムルール（読み取り専用 + 適用トグル）-->
+                <?php $globalRules = $globalRulesByMailbox[$mb['id']] ?? []; ?>
+                <?php if (!empty($globalRules)): ?>
+                <div class="mb-3">
+                    <p class="small fw-semibold text-secondary mb-2">
+                        <i class="bi bi-globe2"></i> システムルール
+                        <span class="badge bg-secondary ms-1"><?= count($globalRules) ?></span>
+                        <span class="text-muted fw-normal">（管理者設定・変更不可）</span>
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:60px">優先度</th>
+                                    <th>対象フィールド</th>
+                                    <th>パターン</th>
+                                    <th style="width:140px">アクション</th>
+                                    <th style="width:110px">自分に適用</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($globalRules as $gRule): ?>
+                                <?php $isExcluded = (bool)$gRule['excluded']; ?>
+                                <tr class="<?= $isExcluded ? 'text-muted' : '' ?>">
+                                    <td class="text-center"><?= (int)$gRule['priority'] ?></td>
+                                    <td class="small"><?= Helpers::e($fieldLabels[$gRule['match_field']] ?? $gRule['match_field']) ?></td>
+                                    <td><code <?= $isExcluded ? 'class="text-muted"' : '' ?>><?= Helpers::e($gRule['match_pattern']) ?></code></td>
+                                    <td>
+                                        <?php if ($gRule['action'] === 'notify'): ?>
+                                            <span class="badge bg-primary <?= $isExcluded ? 'opacity-50' : '' ?>">
+                                                <i class="bi bi-bell"></i> 通知する
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="badge bg-danger <?= $isExcluded ? 'opacity-50' : '' ?>">
+                                                <i class="bi bi-bell-slash"></i> 無視
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <form method="post" action="/my-rules.php" class="m-0">
+                                            <input type="hidden" name="action" value="toggle_global_rule">
+                                            <input type="hidden" name="rule_id" value="<?= (int)$gRule['id'] ?>">
+                                            <input type="hidden" name="csrf_token"
+                                                   value="<?= Helpers::e(Auth::csrfToken()) ?>">
+                                            <div class="form-check form-switch mb-0">
+                                                <input class="form-check-input" type="checkbox" role="switch"
+                                                       id="gr-<?= (int)$gRule['id'] ?>-<?= (int)$mb['id'] ?>"
+                                                       <?= !$isExcluded ? 'checked' : '' ?>
+                                                       onchange="this.form.submit()">
+                                                <label class="form-check-label small text-muted"
+                                                       for="gr-<?= (int)$gRule['id'] ?>-<?= (int)$mb['id'] ?>">
+                                                    <?= $isExcluded ? '無効' : '有効' ?>
+                                                </label>
+                                            </div>
+                                        </form>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <hr class="my-3">
                 <?php endif; ?>
 
                 <!-- ルール追加フォーム -->

@@ -52,12 +52,16 @@ class Classifier
             }
         }
 
-        // Step 2: 全局规则
+        // Step 2: 全局规则（ユーザーが除外したルールはスキップ）
         $global = Database::fetchAll(
-            'SELECT * FROM rules
-             WHERE mailbox_id = ? AND scope = ?
-             ORDER BY priority ASC, id ASC',
-            [$mailboxId, 'global']
+            'SELECT r.* FROM rules r
+             WHERE r.mailbox_id = ? AND r.scope = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM rule_exclusions re
+                   WHERE re.rule_id = r.id AND re.user_id = ?
+               )
+             ORDER BY r.priority ASC, r.id ASC',
+            [$mailboxId, 'global', $userId]
         );
 
         foreach ($global as $rule) {

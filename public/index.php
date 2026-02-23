@@ -26,6 +26,10 @@ $success = '';
 $mode    = 'login';   // login | setup | forgot | forgot_sent | reset | expired
 $token   = '';
 
+$sessionExpiredMsg = isset($_GET['expired'])
+    ? 'セッションが期限切れました。再度ログインしてください。'
+    : '';
+
 // ── GET: モード判定 ───────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if (isset($_GET['setup'])) {
@@ -132,12 +136,8 @@ $formTitle = $titles[$mode] ?? 'ログイン';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= Helpers::e($formTitle) ?> — <?= Helpers::e($appName) ?></title>
-    <link rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-          crossorigin="anonymous">
-    <link rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/assets/css/bootstrap-icons.min.css">
     <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body class="bg-light">
@@ -153,6 +153,13 @@ $formTitle = $titles[$mode] ?? 'ログイン';
             <h1 class="h4 fw-bold mt-1"><?= Helpers::e($appName) ?></h1>
             <p class="text-muted small"><?= Helpers::e($formTitle) ?></p>
         </div>
+
+        <!-- セッション期限切れメッセージ -->
+        <?php if ($sessionExpiredMsg): ?>
+            <div class="alert alert-warning py-2">
+                <i class="bi bi-clock"></i> <?= Helpers::e($sessionExpiredMsg) ?>
+            </div>
+        <?php endif; ?>
 
         <!-- エラー / 成功 メッセージ -->
         <?php if ($errors): ?>
@@ -316,9 +323,7 @@ $formTitle = $titles[$mode] ?? 'ログイン';
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmk0kNnN5lWa5lVQI3bSFB8mnT0"
-        crossorigin="anonymous"></script>
+<script src="/assets/js/bootstrap.bundle.min.js"></script>
 <script src="/assets/js/app.js"></script>
 </body>
 </html>

@@ -141,7 +141,11 @@ class Fetcher
         }
 
         // 增量拉取：UID > last_fetched_uid
+        // UID X:* 検索で X が最大 UID を超えるとサーバーがエラーを返し、
+        // c-client がエラーキューに積む → PHP シャットダウン時に Notice が出る。
+        // imap_errors() でキューを明示的に消去して抑制する。
         $uids = @imap_search($this->imap, 'UID ' . ((int)$lastUid + 1) . ':*', SE_UID);
+        imap_errors();
         return $uids ?: [];
     }
 

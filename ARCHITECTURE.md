@@ -149,6 +149,18 @@ MailGate/
 | `created_by` | INT FK → users | 操作者（管理员或员工本人）|
 | `created_at` | DATETIME | |
 
+### `rule_exclusions` — 社員によるグローバルルールのオプトアウト
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INT PK | |
+| `rule_id` | INT FK → rules (CASCADE) | 除外するグローバルルール |
+| `user_id` | INT FK → users (CASCADE) | オプトアウトした社員 |
+| `created_at` | DATETIME | |
+| UNIQUE KEY | (rule_id, user_id) | 同一ルール×ユーザーの重複防止 |
+
+> レコードが存在する = そのルールを「自分には適用しない」。Classifier の Step 2 で `NOT EXISTS` によりスキップされる。
+
 **规则解析逻辑：**
 ```
 对于某封邮件 M，判断是否通知员工 U（已订阅该邮箱）：
@@ -165,6 +177,8 @@ Step 1 — 个人规则
 
 Step 2 — 全局规则（Step 1 无命中时才到这里）
   查找 rules WHERE mailbox_id=M.mailbox_id AND scope='global'
+    AND NOT EXISTS (rule_exclusions WHERE rule_id=r.id AND user_id=U)
+  ※ 社員がオプトアウト（スイッチOFF）したルールはスキップ
   按 priority ASC 依次匹配
   → 命中 → 按该规则的 action 执行，结束
 
@@ -174,11 +188,13 @@ Step 3 — 兜底
 
 **编辑权限：**
 
-| 操作 | 管理员 | 员工 |
+| 操作 | 管理員 | 社員 |
 |---|---|---|
-| 全局规则（global） | ✅ 增删改 | ❌ 不可见 |
-| 任意员工的个人规则（personal） | ✅ 增删改 | ❌ |
-| 自己的个人规则（personal） | ✅ | ✅ 增删改 |
+| グローバルルール（global）の増删改 | ✅ | ❌ |
+| グローバルルールの閲覧 | ✅ | ✅ 読み取り専用 |
+| グローバルルールの自分への適用トグル（opt-out） | ✅ | ✅ |
+| 任意社員の個人ルール（personal）の増删改 | ✅ | ❌ |
+| 自分の個人ルール（personal）の増删改 | ✅ | ✅ |
 
 > 管理员可直接为员工设定个人规则（代为操作），员工自己的修改与管理员设定的规则处于同一优先级池，均按 priority 排序，无需区分"谁设的"。
 
@@ -356,7 +372,7 @@ cron/fetch.php
 |---|---|
 | `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索 |
 | `mail.php?n={nid}` | 邮件详情（校验当前用户是否在该通知记录中），HTML 正文用 iframe sandbox |
-| `my-rules.php` | 自定义规则管理（针对每个已订阅的邮箱分别设置）|
+| `my-rules.php` | 個人ルール管理（購読中の各メールボックスごとに設定）+ システムルール（グローバル）閲覧・適用トグル |
 | `my-settings.php` | 修改通知邮件地址、修改密码 |
 
 ### 管理员界面

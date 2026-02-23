@@ -11,6 +11,7 @@
 3. [配置 .htaccess（PHP 8.3 + 目录保护）](#3-配置-htaccessphp-83--目录保护)
 4. [安装 Composer 依赖](#4-安装-composer-依赖)
 5. [创建数据库](#5-创建数据库)
+   - [5-b. 既存環境へのスキーママイグレーション](#5-b-既存環境へのスキーママイグレーションアップデート時のみ)
 6. [创建配置文件](#6-创建配置文件)
 7. [设置目录权限](#7-设置目录权限)
 8. [配置 Web 服务器（DocumentRoot）](#8-配置-web-服务器documentroot)
@@ -169,41 +170,89 @@ RewriteRule ^(.*)$ public/$1 [L]
 Xserver 控制面板新增子域名后，会自动创建 `public_html/mailgate.onestep-t.co.jp/` 目录，
 将项目文件上传至该目录（即子域名 DocumentRoot = 项目根目录）。
 
-在**项目根目录**创建 `.htaccess`：
+> **关于 PHP 版本切换方式：**
+> Xserver 的 `SetHandler application/x-httpd-php83` 在某些服务器环境下无法稳定切换 PHP 版本。
+> 本项目实际测试后采用 **`php.fcgi` 方式**（已随项目同梱）强制使用 PHP 8.3。
 
-```bash
-vi ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/.htaccess
-```
+> **重要前提：Xアクセラレータを OFF にすること**
+> `php.fcgi` を有効にするには、子域名が属する**親ドメインの Xアクセラレータを OFF** にする必要があります。
+> Xserver コントロールパネル →「高速化」→「Xアクセラレータ」→ 対象ドメインを選択 → **OFF** に設定。
+> ON のままだと `php.fcgi` が無視され、CGI ハンドラが機能しません。
 
-写入：
+---
+
+##### 步骤 1：确认项目根目录的 `.htaccess`
+
+项目根目录 `.htaccess`（已同梱）内容如下，无需修改：
 
 ```apache
-# PHP バージョンを 8.3 に切り替え
-<FilesMatch "\.php$">
-    SetHandler application/x-httpd-php83
-</FilesMatch>
-
 Options -Indexes
-
 RewriteEngine On
 
-# config/src/sql/cron/vendor/storage への直接アクセス禁止
-RewriteRule ^(config|src|sql|cron|vendor|storage)(/|$) - [F,L]
+# src / config / sql / storage / cron / vendor への直接アクセスを禁止
+RewriteRule ^(src|config|sql|storage|cron|vendor)(/.*)? - [F,L]
 
-# すべてのリクエストを public/ に転送
-RewriteRule ^public/ - [L]
+# /public/ への直接 URL アクセスを禁止（内部転送のみ許可）
+RewriteCond %{THE_REQUEST} \s/public/ [NC]
+RewriteRule ^public(/.*)?$ - [F,L]
+
+# それ以外は全て public/ へ内部転送（リダイレクトループ防止）
+RewriteCond %{REQUEST_URI} !^/public/
 RewriteRule ^(.*)$ public/$1 [L]
 ```
 
-> **注意：`public/` のルールは必ず `[L]` のみ（`[F,L]` にしないこと）。**
-> `[F,L]` にすると、内部リライト後に `public/index.php` が再処理される際に
-> そのルールにマッチして **403 エラー** になる。
+> ルートの `.htaccess` は**転送のみ**担当。PHP 版本の指定は行わない。
 
-`public/.htaccess`（プロジェクトに同梱済み）はセキュリティヘッダーのみ担当。
+---
+
+##### 步骤 2：确认 `public/.htaccess`
+
+`public/.htaccess`（已同梱）内容如下，无需修改：
+
+```apache
+# PHP 8.3 を CGI で実行
+Options +ExecCGI -Indexes
+Action myphp-script /public/php.fcgi
+AddHandler myphp-script .php
+
+# デフォルトページ
+DirectoryIndex index.php
+
+# セキュリティヘッダー
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+```
 
 > **注意：`public/.htaccess` に `php_flag` / `php_value` を書かないこと。**
 > Xserver は PHP を CGI/FastCGI で動かしているため、これらのディレクティブは
 > mod_php 専用であり、使用すると **500 エラー** になる。
+
+---
+
+##### 步骤 3：确认 `php.fcgi` 并赋予执行权限
+
+`public/php.fcgi`（已同梱）内容如下：
+
+```sh
+#!/usr/bin/sh
+export PHP_FCGI_CHILDREN=0
+export PHP_FCGI_MAX_REQUESTS=500
+exec /usr/bin/php-fcgi8.3
+```
+
+**部署后必须赋予执行权限**（Git 不保证可执行位）：
+
+```bash
+chmod +x ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/public/php.fcgi
+```
+
+> `git pull` でコードを更新した場合も、再度 `chmod +x` が必要な場合があります。
+
+---
 
 访问地址：`https://mailgate.onestep-t.co.jp/`
 `config.php` 中 `base_url` 填写：`https://mailgate.onestep-t.co.jp`
@@ -274,6 +323,32 @@ mysql -u mailgate_user -p mailgate \
 
 ---
 
+## 5-b. 既存環境へのスキーママイグレーション（アップデート時のみ）
+
+> **新規インストール時は不要。** `sql/schema.sql` を全件インポートすれば自動的に作成されます。
+
+既にデプロイ済みの環境に対してアップデートを適用する場合は、以下の差分 SQL を phpMyAdmin または MySQL CLI で実行してください。
+
+### rule_exclusions テーブル追加（システムルール Opt-out 機能）
+
+```sql
+CREATE TABLE IF NOT EXISTS `rule_exclusions` (
+    `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `rule_id`    INT UNSIGNED NOT NULL,
+    `user_id`    INT UNSIGNED NOT NULL,
+    `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_rule_exclusion` (`rule_id`, `user_id`),
+    INDEX `idx_excl_user_rule` (`user_id`, `rule_id`),
+    CONSTRAINT `fk_excl_rule` FOREIGN KEY (`rule_id`)
+        REFERENCES `rules` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_excl_user` FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
 ## 6. 创建配置文件
 
 ```bash
@@ -306,6 +381,11 @@ return [
 
     // 生产环境必须为 true（依赖 HTTPS）
     'session_secure' => true,
+
+    // セッション非アクティブタイムアウト（秒）
+    // 指定時間操作がない場合にセッションを無効化してログイン画面へ戻す
+    // デフォルト 1800 秒（30分）
+    'session_timeout' => 1800,
 
     // 显示在页面和通知邮件中的应用名称
     'app_name' => 'MailGate',
@@ -383,8 +463,11 @@ rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 2. 添加以下任务（每 5 分钟执行一次）：
 
 ```
-*/5 * * * * /usr/bin/php8.3 ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/cron/fetch.php >> ~/logs/mailgate.log 2>&1
+*/5 * * * * /usr/bin/php8.3 /home/onestept/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/cron/fetch.php >> /home/onestept/logs/mailgate-$(date +\%Y\%m).log 2>&1
 ```
+
+> 日志文件按月分割（如 `mailgate-202602.log`），避免单个文件无限增长。
+> 旧文件可按需手动删除。`~` 在 Xserver 的 Cron 环境中有时无法正确展开，建议使用绝对路径。
 
 **手动测试 Cron 脚本：**
 
@@ -475,8 +558,9 @@ rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 - 查看 PHP 错误日志（Xserver: 「PHPエラーログ」）
 
 **Q: 页面显示 PHP 语法错误（PHP 7.4 特有）**
-- 说明 `.htaccess` 的 PHP 8.3 切换未生效
-- 确认 `SetHandler application/x-httpd-php83` 写法正确
+- 说明 `php.fcgi` 方式未生效，PHP 版本未切换为 8.3
+- 确认 `public/php.fcgi` 存在且已赋予执行权限（`chmod +x`）
+- 确认 `public/.htaccess` 中 `Options +ExecCGI` 和 `AddHandler` 写法正确
 - 用 `curl -I https://mailgate.onestep-t.co.jp` 查看 `X-Powered-By` 响应头确认版本
 
 **Q: 访问子域名返回 404 或目录列表**

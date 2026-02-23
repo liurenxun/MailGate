@@ -1,0 +1,13 @@
+Options -Indexes
+RewriteEngine On
+
+# src / config / sql / storage / cron / vendor への直接アクセスを禁止
+RewriteRule ^(src|config|sql|storage|cron|vendor)(/.*)? - [F,L]
+
+# /public/ への直接 URL アクセスを禁止（内部転送のみ許可）
+RewriteCond %{THE_REQUEST} \s/public/ [NC]
+RewriteRule ^public(/.*)?$ - [F,L]
+
+# それ以外は全て public/ へ内部転送（リダイレクトループ防止）
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteRule ^(.*)$ public/$1 [L]

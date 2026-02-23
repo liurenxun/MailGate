@@ -1,22 +1,15 @@
-# MailGate — Apache 設定
-
-# PHP バージョンを 8.3 に切り替え（ドメインデフォルト 7.4 を上書き）
-<FilesMatch "\.php$">
-    SetHandler application/x-httpd-php83
-</FilesMatch>
+# PHP 8.3 を CGI で実行
+Options +ExecCGI -Indexes
+Action myphp-script /public/php.fcgi
+AddHandler myphp-script .php
 
 # デフォルトページ
 DirectoryIndex index.php
-
-# ディレクトリ一覧を無効化
-Options -Indexes
-
-# src/ / config/ / sql/ / storage/ への直接アクセス阻止
-# （これらは public/ の外にあるため Apache の DocumentRoot 外）
 
 # セキュリティヘッダー
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 </IfModule>

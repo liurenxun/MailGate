@@ -24,6 +24,9 @@ class Auth
     /** 用户信息缓存（同一请求内避免重复查询） */
     private static ?array $currentUser = null;
 
+    /** セッションタイムアウトによる期限切れフラグ */
+    private static bool $sessionExpired = false;
+
     /** 禁止实例化 */
     private function __construct() {}
 
@@ -41,6 +44,9 @@ class Auth
         if (session_status() !== PHP_SESSION_NONE) {
             return;
         }
+
+        $timeout = (int)(Database::config()['session_timeout'] ?? 1800);
+        ini_set('session.gc_maxlifetime', (string)max($timeout, 1800));
 
         $secure = (bool)(Database::config()['session_secure'] ?? true);
 
@@ -93,8 +99,9 @@ class Auth
         // 防 Session 固定攻击（S8）
         session_regenerate_id(true);
 
-        $_SESSION['user_id']   = (int)$user['id'];
-        $_SESSION['user_role'] = $user['role'];
+        $_SESSION['user_id']    = (int)$user['id'];
+        $_SESSION['user_role']  = $user['role'];
+        $_SESSION['last_active'] = time();
         self::$currentUser     = null; // 清空缓存，下次重新从 DB 读取
 
         return true;
@@ -142,6 +149,17 @@ class Auth
             return null;
         }
 
+        // セッションタイムアウトチェック（スライディングウィンドウ）
+        if (isset($_SESSION['last_active'])) {
+            $timeout = (int)(Database::config()['session_timeout'] ?? 1800);
+            if (time() - $_SESSION['last_active'] > $timeout) {
+                self::$sessionExpired = true;
+                self::logout();
+                return null;
+            }
+            $_SESSION['last_active'] = time();
+        }
+
         // 每次请求都从 DB 读取：确保 disabled 用户立即失效（F7）
         $user = Database::fetchOne(
             'SELECT * FROM users WHERE id = ? AND status = ?',
@@ -162,6 +180,9 @@ class Auth
     public static function requireLogin(): void
     {
         if (self::getCurrentUser() === null) {
+            if (self::$sessionExpired) {
+                Helpers::redirect('/index.php?expired=1');
+            }
             Helpers::redirect('/index.php');
         }
     }
