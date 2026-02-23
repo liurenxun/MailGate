@@ -5,10 +5,6 @@
     SetHandler application/x-httpd-php83
 </FilesMatch>
 
-# PHP エラーを非表示（本番環境）
-php_flag display_errors Off
-php_flag log_errors On
-
 # デフォルトページ
 DirectoryIndex index.php
 

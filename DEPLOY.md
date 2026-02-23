@@ -4,7 +4,7 @@
 
 ---
 
-## 目录
+## 目录earn
 
 1. [环境要求](#1-环境要求)
 2. [获取代码](#2-获取代码)
@@ -195,7 +195,15 @@ RewriteRule ^public/ - [L]
 RewriteRule ^(.*)$ public/$1 [L]
 ```
 
-`public/.htaccess`（プロジェクトに同梱済み）は安全ヘッダーのみ担当。
+> **注意：`public/` のルールは必ず `[L]` のみ（`[F,L]` にしないこと）。**
+> `[F,L]` にすると、内部リライト後に `public/index.php` が再処理される際に
+> そのルールにマッチして **403 エラー** になる。
+
+`public/.htaccess`（プロジェクトに同梱済み）はセキュリティヘッダーのみ担当。
+
+> **注意：`public/.htaccess` に `php_flag` / `php_value` を書かないこと。**
+> Xserver は PHP を CGI/FastCGI で動かしているため、これらのディレクティブは
+> mod_php 専用であり、使用すると **500 エラー** になる。
 
 访问地址：`https://mailgate.onestep-t.co.jp/`
 `config.php` 中 `base_url` 填写：`https://mailgate.onestep-t.co.jp`
