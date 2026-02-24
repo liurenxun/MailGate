@@ -84,4 +84,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // ── 個人ルール編集モーダル populate ─────────────────────────────
+    document.querySelectorAll('.rule-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('editRuleId').value       = btn.dataset.ruleId;
+            document.getElementById('editLabel').value        = btn.dataset.label ?? '';
+            document.getElementById('editMatchField').value   = btn.dataset.matchField;
+            document.getElementById('editMatchPattern').value = btn.dataset.matchPattern;
+            document.getElementById('editRuleAction').value   = btn.dataset.ruleAction;
+            document.getElementById('editPriority').value     = btn.dataset.priority;
+        });
+    });
+
 });

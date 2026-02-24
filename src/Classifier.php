@@ -75,6 +75,42 @@ class Classifier
     }
 
     /**
+     * 判断应对指定用户执行何种操作，并返回命中的规则 ID
+     *
+     * @param array $mail      mails 表行
+     * @param int   $userId
+     * @param int   $mailboxId
+     * @return array{action: string, rule_id: int|null}
+     */
+    public static function resolveWithRule(array $mail, int $userId, int $mailboxId): array
+    {
+        // Step 1: 个人规则
+        $personal = Database::fetchAll(
+            'SELECT * FROM rules WHERE mailbox_id=? AND scope=? AND user_id=? ORDER BY priority ASC, id ASC',
+            [$mailboxId, 'personal', $userId]
+        );
+        foreach ($personal as $rule) {
+            if (self::matches($rule, $mail)) {
+                return ['action' => $rule['action'], 'rule_id' => (int)$rule['id']];
+            }
+        }
+        // Step 2: 全局规则（排除用户已 opt-out 的）
+        $global = Database::fetchAll(
+            'SELECT r.* FROM rules r
+             WHERE r.mailbox_id=? AND r.scope=?
+               AND NOT EXISTS (SELECT 1 FROM rule_exclusions re WHERE re.rule_id=r.id AND re.user_id=?)
+             ORDER BY r.priority ASC, r.id ASC',
+            [$mailboxId, 'global', $userId]
+        );
+        foreach ($global as $rule) {
+            if (self::matches($rule, $mail)) {
+                return ['action' => $rule['action'], 'rule_id' => (int)$rule['id']];
+            }
+        }
+        return ['action' => 'notify', 'rule_id' => null];
+    }
+
+    /**
      * 测试单条规则是否命中某封邮件（供管理界面预览使用）
      *
      * @param array $rule rules 表行

@@ -146,7 +146,20 @@ class Fetcher
         // imap_errors() でキューを明示的に消去して抑制する。
         $uids = @imap_search($this->imap, 'UID ' . ((int)$lastUid + 1) . ':*', SE_UID);
         imap_errors();
-        return $uids ?: [];
+
+        if (!empty($uids)) {
+            return $uids;
+        }
+
+        // フォールバック：UID 増分検索が空の場合、最新 N 封を取得して DB 側で重複排除。
+        // INSERT IGNORE + UNIQUE KEY(mailbox_id, imap_uid) により既存メールは無視される。
+        $allUids = @imap_search($this->imap, 'ALL', SE_UID);
+        imap_errors();
+        if (!$allUids) {
+            return [];
+        }
+        sort($allUids, SORT_NUMERIC);
+        return array_slice($allUids, -$fetchLimit);
     }
 
     // ─────────────────────────────────────────────────────────────

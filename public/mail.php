@@ -100,7 +100,7 @@ include __DIR__ . '/partials/header.php';
                 . '?subject=' . rawurlencode('Re: ' . ($notification['subject'] ?: ''))
                 . '&cc=' . $notification['mailbox_email'];
             ?>
-            <div class="card-header bg-white py-3 d-flex align-items-start gap-3">
+            <div class="card-header bg-white py-3 d-flex align-items-start gap-3 flex-wrap">
                 <div class="flex-grow-1">
                     <h5 class="mb-1">
                         <?= Helpers::e($notification['subject'] ?: '（件名なし）') ?>
@@ -111,15 +111,16 @@ include __DIR__ . '/partials/header.php';
                         (<?= Helpers::e($notification['mailbox_email']) ?>)
                     </span>
                 </div>
-                <div class="d-flex gap-2 flex-shrink-0">
+                <div class="d-flex flex-column flex-sm-row gap-2">
                     <a href="<?= Helpers::e($replyHref) ?>"
                        class="btn btn-sm btn-outline-primary"
                        title="差出人へ返信（CC: <?= Helpers::e($notification['mailbox_email']) ?>）">
                         <i class="bi bi-reply"></i> 返信
                     </a>
-                    <a href="/dashboard.php" class="btn btn-sm btn-outline-secondary">
-                        <i class="bi bi-arrow-left"></i> 一覧へ戻る
-                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                            onclick="history.length > 1 ? history.back() : location.href='/dashboard.php'">
+                        <i class="bi bi-arrow-left"></i> 戻る
+                    </button>
                 </div>
             </div>
 

@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS `subscriptions` (
 CREATE TABLE IF NOT EXISTS `rules` (
     `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `mailbox_id`    INT UNSIGNED NOT NULL,
+    `label`         VARCHAR(100) NOT NULL DEFAULT '',  -- ルールの表示名（必須）
     `scope`         ENUM('global','personal') NOT NULL,
     `user_id`       INT UNSIGNED NULL DEFAULT NULL,  -- scope=global 时为 NULL
     `match_field`   ENUM('from_address','from_domain','subject','any') NOT NULL,
@@ -171,6 +172,8 @@ CREATE TABLE IF NOT EXISTS `notifications` (
     `email_retry_count` TINYINT UNSIGNED NOT NULL DEFAULT 0, -- 超过 3 次不再重试 (F3)
     `is_trashed`        TINYINT UNSIGNED NOT NULL DEFAULT 0,
     `trashed_at`        DATETIME         NULL     DEFAULT NULL,
+    `is_ignored`        TINYINT(1)       NOT NULL DEFAULT 0    COMMENT '0=通常 1=無視（ルール/手動）',
+    `matched_rule_id`   INT UNSIGNED     NULL     DEFAULT NULL COMMENT '命中ルール ID',
 
     PRIMARY KEY (`id`),
     -- D3: 防止 Cron 重跑产生重复通知
@@ -178,12 +181,15 @@ CREATE TABLE IF NOT EXISTS `notifications` (
     INDEX      `idx_notif_user_read`   (`user_id`, `is_read`, `is_trashed`),
     -- Cron 重试查询索引：找出 email_sent_at IS NULL 且重试次数未达上限的记录
     INDEX      `idx_notif_retry`       (`email_sent_at`, `email_retry_count`),
+    INDEX      `idx_notif_ignored`     (`user_id`, `is_ignored`, `is_trashed`),
     -- D4: 邮件删除时级联删除通知
     CONSTRAINT `fk_notif_mail` FOREIGN KEY (`mail_id`)
         REFERENCES `mails` (`id`) ON DELETE CASCADE,
     -- D4: 用户删除时级联删除其通知
     CONSTRAINT `fk_notif_user` FOREIGN KEY (`user_id`)
-        REFERENCES `users` (`id`) ON DELETE CASCADE
+        REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_notif_rule` FOREIGN KEY (`matched_rule_id`)
+        REFERENCES `rules` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

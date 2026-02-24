@@ -114,6 +114,8 @@ rm mailgate.zip
     ├── src/
     ├── storage/
     ├── config/                      ← config.php 需手动创建，不含于 Git
+    │   ├── config.php               ← 手动创建（参考 config.example.php）
+    │   └── config.example.php       ← テンプレート（Git 管理対象）
     ├── composer.json
     └── setup-admin.php
 ```
@@ -343,6 +345,16 @@ ALTER TABLE `notifications`
 
 ---
 
+### rules テーブルに label カラム追加
+
+```sql
+ALTER TABLE `rules`
+    ADD COLUMN `label` VARCHAR(100) NOT NULL DEFAULT ''
+    AFTER `mailbox_id`;
+```
+
+---
+
 ### rule_exclusions テーブル追加（システムルール Opt-out 機能）
 
 ```sql
@@ -359,6 +371,18 @@ CREATE TABLE IF NOT EXISTS `rule_exclusions` (
     CONSTRAINT `fk_excl_user` FOREIGN KEY (`user_id`)
         REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+### is_ignored / matched_rule_id カラム追加（無視メール表示機能）
+
+```sql
+ALTER TABLE `notifications`
+    ADD COLUMN `is_ignored`      TINYINT(1)   NOT NULL DEFAULT 0    COMMENT '0=通常 1=無視' AFTER `is_trashed`,
+    ADD COLUMN `matched_rule_id` INT UNSIGNED  NULL     DEFAULT NULL COMMENT '命中ルールID'  AFTER `is_ignored`,
+    ADD INDEX  `idx_notif_ignored` (`user_id`, `is_ignored`, `is_trashed`),
+    ADD CONSTRAINT `fk_notif_rule` FOREIGN KEY (`matched_rule_id`) REFERENCES `rules` (`id`) ON DELETE SET NULL;
 ```
 
 ---

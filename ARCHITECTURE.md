@@ -51,7 +51,7 @@ MailGate/
 │   ├── admin/
 │   │   ├── mailboxes.php        # 管理监控邮箱
 │   │   ├── users.php            # 管理员工账号
-│   │   ├── base-rules.php       # 基础规则管理
+│   │   ├── rules.php            # グローバル・個人ルール管理
 │   │   ├── subscriptions.php    # 分配：哪个员工订阅哪个邮箱
 │   │   └── settings.php        # 系统设置（SMTP等）
 │   │
@@ -72,9 +72,7 @@ MailGate/
 │   └── fetch.php                # Cron 入口
 │
 ├── config/
-│   └── config.php               # DB / 加密密钥 / 全局配置（不入 Git）
-│
-├── config/
+│   ├── config.php               # DB / 加密密钥 / 全局配置（不入 Git）
 │   └── config.example.php       # 配置模板（入 Git）
 │
 ├── sql/
@@ -140,6 +138,7 @@ MailGate/
 |---|---|---|
 | `id` | INT PK | |
 | `mailbox_id` | INT FK → monitored_mailboxes | |
+| `label` | VARCHAR(100) NOT NULL DEFAULT '' | ルールの表示名（必須）|
 | `scope` | ENUM('global','personal') | global=适用该邮箱所有订阅者；personal=针对特定员工 |
 | `user_id` | INT FK → users NULL | scope=global 时为 NULL；personal 时为目标员工 |
 | `match_field` | ENUM('from_address','from_domain','subject','any') | |
@@ -226,6 +225,8 @@ Step 3 — 兜底
 | `notified_at` | DATETIME | 通知记录创建时间 |
 | `email_sent_at` | DATETIME NULL | 通知邮件发送时间（NULL=未发或发送失败）|
 | `email_retry_count` | TINYINT DEFAULT 0 | 发送重试次数（超过 3 次不再重试）|
+| `is_trashed` | TINYINT DEFAULT 0 | ゴミ箱フラグ（1=ゴミ箱）|
+| `trashed_at` | DATETIME NULL | ゴミ箱移動日時 |
 | UNIQUE KEY | (mail_id, user_id) | 防止重复通知 |
 
 ### `attachments` — 附件
@@ -312,6 +313,9 @@ cron/fetch.php
       拉取最近 N 封（fetch_limit，防止首次拉取积压）
     else:
       UID FETCH (last_fetched_uid+1):* — 只取 UID 大于上次的邮件
+      → 若结果为空（UID 跳号/重排等异常）：
+          フォールバック：最新 N 封を再取得し DB 側で重複排除
+          INSERT IGNORE + UNIQUE KEY(mailbox_id, imap_uid) により既存メールはスキップ
 
     for each mail:
       // 原子去重：依赖数据库 UNIQUE KEY (mailbox_id, message_id)
@@ -370,7 +374,7 @@ cron/fetch.php
 
 | 页面 | 功能 |
 |---|---|
-| `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索 |
+| `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索、差出人/発信サーバーソート、ゴミ箱（移動・復元・完全削除）|
 | `mail.php?n={nid}` | 邮件详情（校验当前用户是否在该通知记录中），HTML 正文用 iframe sandbox |
 | `my-rules.php` | 個人ルール管理（購読中の各メールボックスごとに設定）+ システムルール（グローバル）閲覧・適用トグル |
 | `my-settings.php` | 修改通知邮件地址、修改密码 |
@@ -427,7 +431,7 @@ cron/fetch.php
 |---|---|
 | PHP | 8.3 |
 | IMAP 拉取 | PHP `imap_*` 内置函数（Xserver 已预装）|
-| MIME 解析 | `php-mime-mail-parser`（Composer）|
+| MIME 解析 | `zbateson/mail-mime-parser`（Composer、纯 PHP 实现，无需 PECL 扩展）|
 | 前端 | Bootstrap 5 + 原生 JS |
 | 数据库 | MySQL 5.7（PDO）|
 | 邮件发送 | 封装为 `Mailer` 类，配置切换 `mail()` 或 PHPMailer SMTP |

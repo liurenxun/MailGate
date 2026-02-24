@@ -32,18 +32,17 @@ class Notifier
         );
 
         foreach ($subscribers as $user) {
-            $action = Classifier::resolve($mail, (int)$user['id'], (int)$mailbox['id']);
+            $result    = Classifier::resolveWithRule($mail, (int)$user['id'], (int)$mailbox['id']);
+            $isIgnored = $result['action'] === 'ignore' ? 1 : 0;
+            $ruleId    = $result['rule_id'];
 
-            if ($action !== 'notify') {
-                continue;
-            }
-
-            // INSERT IGNORE — UNIQUE KEY (mail_id, user_id) 保证幂等
+            // INSERT IGNORE — UNIQUE KEY (mail_id, user_id) 保证幂等；始终记录（含无视）
             $pdo  = Database::get();
             $stmt = $pdo->prepare(
-                'INSERT IGNORE INTO notifications (mail_id, user_id) VALUES (?, ?)'
+                'INSERT IGNORE INTO notifications (mail_id, user_id, is_ignored, matched_rule_id)
+                 VALUES (?, ?, ?, ?)'
             );
-            $stmt->execute([(int)$mail['id'], (int)$user['id']]);
+            $stmt->execute([(int)$mail['id'], (int)$user['id'], $isIgnored, $ruleId]);
 
             if ($stmt->rowCount() === 0) {
                 continue; // 已存在，跳过（Cron 重跑保护）
@@ -51,19 +50,22 @@ class Notifier
 
             $notificationId = Database::lastInsertId();
 
-            $sent = Mailer::sendNotification($user, $mail, $mailbox, $notificationId);
+            // 只有 notify 才发邮件
+            if (!$isIgnored) {
+                $sent = Mailer::sendNotification($user, $mail, $mailbox, $notificationId);
 
-            if ($sent) {
-                Database::query(
-                    'UPDATE notifications SET email_sent_at = NOW() WHERE id = ?',
-                    [$notificationId]
-                );
-            } else {
-                // email_retry_count = 1，下次 Cron 会重试（F3）
-                Database::query(
-                    'UPDATE notifications SET email_retry_count = 1 WHERE id = ?',
-                    [$notificationId]
-                );
+                if ($sent) {
+                    Database::query(
+                        'UPDATE notifications SET email_sent_at = NOW() WHERE id = ?',
+                        [$notificationId]
+                    );
+                } else {
+                    // email_retry_count = 1，下次 Cron 会重试（F3）
+                    Database::query(
+                        'UPDATE notifications SET email_retry_count = 1 WHERE id = ?',
+                        [$notificationId]
+                    );
+                }
             }
         }
     }
@@ -106,6 +108,7 @@ class Notifier
              WHERE n.email_sent_at IS NULL
                AND n.email_retry_count < 3
                AND n.notified_at > NOW() - INTERVAL 24 HOUR
+               AND n.is_ignored = 0
                AND u.status = ?',
             ['active']
         );

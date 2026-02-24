@@ -6,7 +6,8 @@ declare(strict_types=1);
  *
  * フィルタ（GETパラメータ）：
  *   ?mailbox={id}  : 指定メールボックスで絞り込み
- *   ?read={0|1}    : 未読(0) / 既読(1) 絞り込み
+ *   ?read={0|1|}   : 未読(0) / 既読(1) / すべて('') 絞り込み
+ *   ?rule={id}     : 命中ルール ID で絞り込み
  *   ?q={keyword}   : 件名・差出人キーワード検索
  *   ?page={n}      : ページ番号
  */
@@ -60,8 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // ── フィルタ値取得 ─────────────────────────────────────────────────
 $viewTrash     = isset($_GET['view']) && $_GET['view'] === 'trash';
+$viewIgnored   = isset($_GET['view']) && $_GET['view'] === 'ignored';
 $filterMailbox = (int)($_GET['mailbox'] ?? 0);
 $filterRead    = $_GET['read'] ?? '';   // '0' | '1' | ''
+$filterRule    = (int)($_GET['rule'] ?? 0);
 $search        = trim($_GET['q'] ?? '');
 $page          = max(1, (int)($_GET['page'] ?? 1));
 $perPage       = 30;
@@ -90,16 +93,62 @@ $mailboxes = Database::fetchAll(
 $where  = ['n.user_id = ?'];
 $params = [(int)$user['id']];
 
-$where[] = $viewTrash ? 'n.is_trashed = 1' : 'n.is_trashed = 0';
+if ($viewTrash) {
+    $where[] = 'n.is_trashed = 1';
+} elseif ($viewIgnored) {
+    $where[] = 'n.is_ignored = 1';
+} else {
+    $where[] = 'n.is_trashed = 0';
+    // すべて は is_ignored を問わず表示（無視含む）
+}
 
 if ($filterMailbox > 0) {
     $where[]  = 'mb.id = ?';
     $params[] = $filterMailbox;
 }
-if ($filterRead === '0') {
-    $where[] = 'n.is_read = 0';
-} elseif ($filterRead === '1') {
-    $where[] = 'n.is_read = 1';
+// 未読/既読フィルタは通常ビューのみ
+if (!$viewTrash && !$viewIgnored) {
+    if ($filterRead === '0') {
+        $where[] = 'n.is_read = 0';
+        $where[] = 'n.is_ignored = 0';   // 未読は無視を除外
+    } elseif ($filterRead === '1') {
+        $where[] = 'n.is_read = 1';
+        $where[] = 'n.is_ignored = 0';   // 既読は無視を除外
+    }
+    // read='' (すべて): is_ignored 条件なし
+}
+if ($filterRule > 0) {
+    // matched_rule_id が NULL の旧レコードもカバーするためリアルタイム SQL マッチを併用
+    $ruleRow = Database::fetchOne('SELECT * FROM rules WHERE id=?', [$filterRule]);
+    if ($ruleRow) {
+        // PHP ワイルドカード(*) → SQL LIKE(%) へ変換（% _ をエスケープ）
+        $lp = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $ruleRow['match_pattern']);
+        $lp = str_replace('*', '%', $lp);
+        switch ($ruleRow['match_field']) {
+            case 'from_address':
+                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND m.from_address LIKE ?))";
+                array_push($params, $filterRule, $lp);
+                break;
+            case 'from_domain':
+                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND SUBSTRING_INDEX(m.from_address,'@',-1) LIKE ?))";
+                array_push($params, $filterRule, $lp);
+                break;
+            case 'subject':
+                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND m.subject LIKE ?))";
+                array_push($params, $filterRule, $lp);
+                break;
+            case 'any':
+                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND (m.from_address LIKE ? OR m.from_name LIKE ? OR m.subject LIKE ?)))";
+                array_push($params, $filterRule, $lp, $lp, $lp);
+                break;
+            default:
+                $where[]  = 'n.matched_rule_id = ?';
+                $params[] = $filterRule;
+        }
+    } else {
+        $where[]  = 'n.matched_rule_id = ?';
+        $params[] = $filterRule;
+    }
 }
 if ($search !== '') {
     $where[]  = '(m.subject LIKE ? OR m.from_address LIKE ? OR m.from_name LIKE ?)';
@@ -121,7 +170,7 @@ $offset = ($page - 1) * $perPage;
 
 // データ取得
 $notifications = Database::fetchAll(
-    "SELECT n.id, n.is_read, n.notified_at,
+    "SELECT n.id, n.is_read, n.is_ignored, n.matched_rule_id, n.notified_at,
             m.subject, m.from_name, m.from_address, m.received_at,
             mb.id AS mailbox_id, mb.label AS mailbox_label,
             (SELECT COUNT(*) FROM attachments
@@ -139,6 +188,7 @@ function buildQuery(array $overrides = []): string
         'view'    => $_GET['view']    ?? '',
         'mailbox' => $_GET['mailbox'] ?? '',
         'read'    => $_GET['read']    ?? '',
+        'rule'    => $_GET['rule']    ?? '',
         'q'       => $_GET['q']       ?? '',
         'sort'    => $_GET['sort']    ?? '',
         'page'    => '1',
@@ -148,6 +198,31 @@ function buildQuery(array $overrides = []): string
     $params = array_merge($base, $overrides);
     $query  = http_build_query(array_filter($params, fn($v) => $v !== ''));
     return $query ? '?' . $query : '';
+}
+
+// ── ルールフィルタ選択肢 ──────────────────────────────────────────
+$filterRuleOptions = [];
+if (!$viewTrash) {  // 通常ビュー・無視ビュー両方で表示
+    $mbCond   = $filterMailbox > 0 ? 'AND r.mailbox_id=?' : '';
+    $mbParams = $filterMailbox > 0 ? [$filterMailbox] : [];
+    $filterRuleOptions = Database::fetchAll(
+        "SELECT r.id, r.label, r.scope, mb.label AS mailbox_label
+         FROM rules r
+         INNER JOIN monitored_mailboxes mb ON mb.id = r.mailbox_id
+         INNER JOIN subscriptions s ON s.mailbox_id = r.mailbox_id AND s.user_id = ?
+         WHERE (
+             (r.scope='personal' AND r.user_id=?)
+             OR
+             (r.scope='global' AND NOT EXISTS (
+                 SELECT 1 FROM rule_exclusions re WHERE re.rule_id=r.id AND re.user_id=?
+             ))
+         )
+         AND NOT (r.match_field='any' AND r.match_pattern='*'
+                  AND r.action='ignore' AND r.priority=999)
+         {$mbCond}
+         ORDER BY mb.label ASC, r.scope DESC, r.label ASC",
+        array_merge([(int)$user['id'], (int)$user['id'], (int)$user['id']], $mbParams)
+    );
 }
 
 include __DIR__ . '/partials/header.php';
@@ -191,52 +266,87 @@ include __DIR__ . '/partials/header.php';
             <!-- ヘッダー：タブ + 検索 -->
             <div class="card-header bg-white py-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
 
-                <!-- 既読/未読タブ + ゴミ箱タブ -->
-                <div class="d-flex align-items-center gap-1">
-                    <?php if (!$viewTrash): ?>
-                    <ul class="nav nav-pills nav-sm gap-1 mb-0">
-                        <li class="nav-item">
-                            <a class="nav-link py-1 px-3 <?= $filterRead === '' ? 'active' : '' ?>"
-                               href="/dashboard.php<?= buildQuery(['read' => '', 'page' => '1']) ?>">
-                                すべて
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link py-1 px-3 <?= $filterRead === '0' ? 'active' : '' ?>"
-                               href="/dashboard.php<?= buildQuery(['read' => '0', 'page' => '1']) ?>">
-                                <i class="bi bi-circle-fill text-primary" style="font-size:.5rem;vertical-align:middle"></i>
-                                未読
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link py-1 px-3 <?= $filterRead === '1' ? 'active' : '' ?>"
-                               href="/dashboard.php<?= buildQuery(['read' => '1', 'page' => '1']) ?>">
-                                既読
-                            </a>
-                        </li>
-                    </ul>
+                <!-- フィルタ群 + 無視・ゴミ箱タブ -->
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <?php if ($viewTrash || $viewIgnored): ?>
+                    <a href="/dashboard.php" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> 一覧へ戻る
+                    </a>
                     <?php else: ?>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="text-muted small"><i class="bi bi-trash3"></i> ゴミ箱</span>
-                        <a href="/dashboard.php" class="btn btn-sm btn-outline-secondary">
-                            <i class="bi bi-arrow-left"></i> 一覧へ戻る
-                        </a>
-                    </div>
+                    <select class="form-select form-select-sm" style="width:auto"
+                            onchange="location.href=this.value">
+                        <option value="/dashboard.php<?= buildQuery(['read' => '',  'page' => '1']) ?>"
+                                <?= $filterRead === ''  ? 'selected' : '' ?>>すべて</option>
+                        <option value="/dashboard.php<?= buildQuery(['read' => '0', 'page' => '1']) ?>"
+                                <?= $filterRead === '0' ? 'selected' : '' ?>>未読</option>
+                        <option value="/dashboard.php<?= buildQuery(['read' => '1', 'page' => '1']) ?>"
+                                <?= $filterRead === '1' ? 'selected' : '' ?>>既読</option>
+                    </select>
+                    <?php endif; ?>
+
+                    <?php if (!$viewTrash && !empty($filterRuleOptions)): ?>
+                    <select class="form-select form-select-sm" style="width:auto"
+                            onchange="location.href=this.value">
+                        <option value="/dashboard.php<?= buildQuery(['rule' => '', 'page' => '1']) ?>"
+                                <?= $filterRule === 0 ? 'selected' : '' ?>>受信ルール: すべて</option>
+                        <?php foreach ($filterRuleOptions as $ro): ?>
+                        <option value="/dashboard.php<?= buildQuery(['rule' => $ro['id'], 'page' => '1']) ?>"
+                                <?= $filterRule === (int)$ro['id'] ? 'selected' : '' ?>>
+                            <?= Helpers::e(($ro['scope'] === 'global' ? '[G] ' : '') . $ro['label']
+                                . ($filterMailbox === 0 ? ' — ' . $ro['mailbox_label'] : '')) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
                     <?php endif; ?>
 
                     <?php
+                    $ignoredCount = (int)(Database::fetchOne(
+                        'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id=? AND is_ignored=1 AND is_trashed=0',
+                        [(int)$user['id']]
+                    )['cnt'] ?? 0);
                     $trashCount = (int)(Database::fetchOne(
                         'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id=? AND is_trashed=1',
                         [(int)$user['id']]
                     )['cnt'] ?? 0);
                     ?>
-                    <a class="nav-link py-1 px-2 ms-2 <?= $viewTrash ? 'active' : '' ?>"
+
+                    <?php if (!$viewTrash): ?>
+                    <?php if ($viewIgnored): ?>
+                    <span class="nav-link py-1 px-2 active" style="pointer-events:none">
+                        <i class="bi bi-eye-slash"></i> 無視
+                        <?php if ($ignoredCount > 0): ?>
+                            <span class="badge bg-secondary ms-1"><?= $ignoredCount ?></span>
+                        <?php endif; ?>
+                    </span>
+                    <?php else: ?>
+                    <a class="nav-link py-1 px-2"
+                       href="/dashboard.php<?= buildQuery(['view' => 'ignored', 'read' => '', 'page' => '1']) ?>">
+                        <i class="bi bi-eye-slash"></i> 無視
+                        <?php if ($ignoredCount > 0): ?>
+                            <span class="badge bg-secondary ms-1"><?= $ignoredCount ?></span>
+                        <?php endif; ?>
+                    </a>
+                    <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if (!$viewIgnored): ?>
+                    <?php if ($viewTrash): ?>
+                    <span class="nav-link py-1 px-2 active" style="pointer-events:none">
+                        <i class="bi bi-trash3"></i> ゴミ箱
+                        <?php if ($trashCount > 0): ?>
+                            <span class="badge bg-secondary ms-1"><?= $trashCount ?></span>
+                        <?php endif; ?>
+                    </span>
+                    <?php else: ?>
+                    <a class="nav-link py-1 px-2"
                        href="/dashboard.php<?= buildQuery(['view' => 'trash', 'read' => '', 'page' => '1']) ?>">
                         <i class="bi bi-trash3"></i> ゴミ箱
                         <?php if ($trashCount > 0): ?>
                             <span class="badge bg-secondary ms-1"><?= $trashCount ?></span>
                         <?php endif; ?>
                     </a>
+                    <?php endif; ?>
+                    <?php endif; ?>
                 </div>
 
                 <!-- キーワード検索 + ソート -->
@@ -249,6 +359,9 @@ include __DIR__ . '/partials/header.php';
                     <?php endif; ?>
                     <?php if ($filterRead !== ''): ?>
                         <input type="hidden" name="read" value="<?= Helpers::e($filterRead) ?>">
+                    <?php endif; ?>
+                    <?php if ($filterRule > 0): ?>
+                        <input type="hidden" name="rule" value="<?= $filterRule ?>">
                     <?php endif; ?>
                     <select name="sort" class="form-select form-select-sm"
                             style="width:auto" onchange="this.form.submit()">
@@ -289,7 +402,7 @@ include __DIR__ . '/partials/header.php';
                         </tr>
                     <?php else: ?>
                         <?php foreach ($notifications as $n): ?>
-                        <?php $rowClass = $n['is_read'] ? 'notif-read' : 'notif-unread'; ?>
+                        <?php $rowClass = $n['is_ignored'] ? 'notif-ignored' : ($n['is_read'] ? 'notif-read' : 'notif-unread'); ?>
                         <tr class="<?= $rowClass ?>"
                             onclick="location.href='/mail.php?n=<?= (int)$n['id'] ?>'"
                             style="cursor:pointer">
@@ -305,6 +418,9 @@ include __DIR__ . '/partials/header.php';
                                 <?= Helpers::e($n['subject'] ?: '（件名なし）') ?>
                                 <?php if ((int)($n['attachment_count'] ?? 0) > 0): ?>
                                     <i class="bi bi-paperclip text-muted ms-1" title="添付ファイルあり"></i>
+                                <?php endif; ?>
+                                <?php if ($n['is_ignored']): ?>
+                                    <span class="badge bg-secondary ms-1 opacity-50">無視</span>
                                 <?php endif; ?>
                             </td>
                             <td class="text-muted small">
