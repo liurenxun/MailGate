@@ -37,6 +37,7 @@ $notification = Database::fetchOne(
             m.body_text,
             m.body_html,
             m.received_at,
+            mb.id           AS mailbox_id,
             mb.label        AS mailbox_label,
             mb.email_address AS mailbox_email
      FROM notifications n
@@ -73,6 +74,17 @@ $attachments = Database::fetchAll(
 );
 
 $pageTitle = $notification['subject'] ?: '（件名なし）';
+
+// ── POST ハンドラ（ゴミ箱移動）────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') && ($_POST['action'] ?? '') === 'trash') {
+        Database::query(
+            'UPDATE notifications SET is_trashed=1, trashed_at=NOW() WHERE id=?',
+            [$nid]
+        );
+        Helpers::redirect('/dashboard.php');
+    }
+}
 
 include __DIR__ . '/partials/header.php';
 ?>
@@ -111,7 +123,20 @@ include __DIR__ . '/partials/header.php';
                         (<?= Helpers::e($notification['mailbox_email']) ?>)
                     </span>
                 </div>
-                <div class="d-flex flex-column flex-sm-row gap-2">
+                <div class="d-flex flex-column flex-sm-row gap-2 flex-wrap">
+                    <a href="/my-rules.php?nid=<?= (int)$nid ?>"
+                       class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-funnel"></i> ルール設定
+                    </a>
+                    <form method="post" action="/mail.php?n=<?= (int)$nid ?>" class="m-0">
+                        <input type="hidden" name="action" value="trash">
+                        <input type="hidden" name="csrf_token"
+                               value="<?= Helpers::e(Auth::csrfToken()) ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                data-confirm="このメールをゴミ箱に移動しますか？">
+                            <i class="bi bi-trash3"></i> 削除
+                        </button>
+                    </form>
                     <a href="<?= Helpers::e($replyHref) ?>"
                        class="btn btn-sm btn-outline-primary"
                        title="差出人へ返信（CC: <?= Helpers::e($notification['mailbox_email']) ?>）">

@@ -307,6 +307,25 @@ $actionLabels = [
     'ignore' => '通知しない（無視）',
 ];
 
+// ── メール詳細からのヒント情報（?nid= パラメータ）──────────────────
+$mailHint = null;
+$hintNid  = (int)($_GET['nid'] ?? 0);
+if ($hintNid > 0) {
+    $hintRow = Database::fetchOne(
+        'SELECT m.from_name, m.from_address, m.to_address, m.subject,
+                LEFT(IFNULL(m.body_text, \'\'), 200) AS body_preview,
+                mb.id AS mailbox_id, mb.email_address AS mailbox_email
+         FROM notifications n
+         INNER JOIN mails m              ON m.id  = n.mail_id
+         INNER JOIN monitored_mailboxes mb ON mb.id = m.mailbox_id
+         WHERE n.id = ? AND n.user_id = ?',
+        [$hintNid, (int)$user['id']]
+    );
+    if ($hintRow) {
+        $mailHint = $hintRow;
+    }
+}
+
 include __DIR__ . '/partials/header.php';
 ?>
 
@@ -350,14 +369,42 @@ include __DIR__ . '/partials/header.php';
 <!-- ── メールボックスごとのルール管理（アコーディオン）── -->
 <div class="accordion" id="rulesAccordion">
     <?php foreach ($mailboxes as $i => $mb): ?>
-    <?php $rules = $rulesByMailbox[$mb['id']] ?? []; ?>
+    <?php
+    $rules      = $rulesByMailbox[$mb['id']] ?? [];
+    $isHintMb   = $mailHint !== null && (int)$mailHint['mailbox_id'] === (int)$mb['id'];
+    $isOpen     = $mailHint !== null ? $isHintMb : ($i === 0);
+    // ヒントフォーム用の変数初期化
+    $existingHintRule = null;
+    $hintLabel        = '';
+    $hintPattern      = '';
+    $hintField        = 'from_address';
+    $hintAction       = 'notify';
+    $hintPriority     = 50;
+    if ($isHintMb) {
+        $existingHintRule = Database::fetchOne(
+            "SELECT * FROM rules WHERE mailbox_id=? AND scope='personal' AND user_id=? AND match_pattern=?",
+            [(int)$mb['id'], (int)$user['id'], $mailHint['from_address']]
+        );
+        if ($existingHintRule) {
+            $hintLabel    = $existingHintRule['label'];
+            $hintPattern  = $existingHintRule['match_pattern'];
+            $hintField    = $existingHintRule['match_field'];
+            $hintAction   = $existingHintRule['action'];
+            $hintPriority = (int)$existingHintRule['priority'];
+        } else {
+            $hintLabel   = $mailHint['from_name'] ?: $mailHint['from_address'];
+            $hintPattern = $mailHint['from_address'];
+        }
+    }
+    $hasExisting = $isHintMb && $existingHintRule !== null;
+    ?>
     <div class="accordion-item border-0 shadow-sm mb-3 rounded">
         <h2 class="accordion-header">
-            <button class="accordion-button <?= $i > 0 ? 'collapsed' : '' ?> rounded fw-semibold"
+            <button class="accordion-button <?= $isOpen ? '' : 'collapsed' ?> rounded fw-semibold"
                     type="button"
                     data-bs-toggle="collapse"
                     data-bs-target="#collapse-<?= (int)$mb['id'] ?>"
-                    aria-expanded="<?= $i === 0 ? 'true' : 'false' ?>">
+                    aria-expanded="<?= $isOpen ? 'true' : 'false' ?>">
                 <span>
                     <i class="bi bi-inbox me-2 text-primary"></i>
                     <?= Helpers::e($mb['label']) ?>
@@ -369,7 +416,7 @@ include __DIR__ . '/partials/header.php';
             </button>
         </h2>
         <div id="collapse-<?= (int)$mb['id'] ?>"
-             class="accordion-collapse collapse <?= $i === 0 ? 'show' : '' ?>"
+             class="accordion-collapse collapse <?= $isOpen ? 'show' : '' ?>"
              data-bs-parent="#rulesAccordion">
             <div class="accordion-body">
 
@@ -513,11 +560,28 @@ include __DIR__ . '/partials/header.php';
                 <?php endif; ?>
 
                 <!-- ルール追加フォーム -->
+                <?php
+                $origValues = $hasExisting ? htmlspecialchars(json_encode([
+                    'label'         => $hintLabel,
+                    'match_field'   => $hintField,
+                    'match_pattern' => $hintPattern,
+                    'rule_action'   => $hintAction,
+                    'priority'      => (string)$hintPriority,
+                ]), ENT_QUOTES, 'UTF-8') : '';
+                ?>
                 <div class="border rounded p-3 bg-light">
                     <p class="small fw-semibold mb-2">
                         <i class="bi bi-plus-circle text-success"></i> ルールを追加
                     </p>
-                    <form method="post" action="/my-rules.php">
+                    <div class="alert alert-warning py-2 small mb-3">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <strong>追加時の注意：</strong>
+                        既存のルールと競合しないか確認してください。
+                        優先度は数字が小さいほど先に評価されます。順序が意図したとおりになっているか、追加前にご確認ください。
+                    </div>
+                    <form method="post" action="/my-rules.php"
+                          <?= $isHintMb ? 'class="hint-add-form"' : '' ?>
+                          <?= $hasExisting ? 'data-has-existing="1" data-orig-values="' . $origValues . '"' : '' ?>>
                         <input type="hidden" name="action"     value="add">
                         <input type="hidden" name="mailbox_id" value="<?= (int)$mb['id'] ?>">
                         <input type="hidden" name="csrf_token"
@@ -528,13 +592,17 @@ include __DIR__ . '/partials/header.php';
                                 <input type="text" name="label"
                                        class="form-control form-control-sm"
                                        placeholder="例: 取引先通知、スパム除外"
-                                       maxlength="100" required>
+                                       maxlength="100" required
+                                       value="<?= Helpers::e($hintLabel) ?>">
                             </div>
                             <div class="col-sm-2">
                                 <label class="form-label small mb-1">対象フィールド</label>
                                 <select name="match_field" class="form-select form-select-sm" required>
                                     <?php foreach ($fieldLabels as $val => $lbl): ?>
-                                    <option value="<?= $val ?>"><?= Helpers::e($lbl) ?></option>
+                                    <option value="<?= $val ?>"
+                                            <?= $val === $hintField ? 'selected' : '' ?>>
+                                        <?= Helpers::e($lbl) ?>
+                                    </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -546,27 +614,59 @@ include __DIR__ . '/partials/header.php';
                                 <input type="text" name="match_pattern"
                                        class="form-control form-control-sm"
                                        placeholder="例: *@example.com, *請求*"
-                                       required>
+                                       required
+                                       value="<?= Helpers::e($hintPattern) ?>">
                             </div>
                             <div class="col-sm-2">
                                 <label class="form-label small mb-1">アクション</label>
                                 <select name="rule_action" class="form-select form-select-sm" required>
-                                    <option value="notify">通知する</option>
-                                    <option value="ignore">通知しない（無視）</option>
+                                    <option value="notify" <?= $hintAction === 'notify' ? 'selected' : '' ?>>通知する</option>
+                                    <option value="ignore" <?= $hintAction === 'ignore' ? 'selected' : '' ?>>通知しない（無視）</option>
                                 </select>
                             </div>
                             <div class="col-sm-1">
                                 <label class="form-label small mb-1">優先度</label>
                                 <input type="number" name="priority" class="form-control form-control-sm"
-                                       value="50" min="1" max="999">
+                                       value="<?= $isHintMb ? $hintPriority : 50 ?>" min="1" max="999">
                             </div>
                             <div class="col-sm-1 d-flex align-items-end">
-                                <button type="submit" class="btn btn-sm btn-success w-100">
+                                <button type="submit"
+                                        class="btn btn-sm btn-success w-100<?= $hasExisting ? ' hint-submit-btn' : '' ?>"
+                                        <?= $hasExisting ? 'disabled' : '' ?>>
                                     <i class="bi bi-plus"></i> 追加
                                 </button>
                             </div>
                         </div>
                     </form>
+
+                    <?php if ($isHintMb): ?>
+                    <!-- キーワード参考情報 -->
+                    <div class="mt-3 pt-3 border-top">
+                        <p class="small fw-semibold text-secondary mb-2">
+                            <i class="bi bi-tag"></i> キーワード（ルール設定の参考情報）
+                        </p>
+                        <dl class="row mb-0 small">
+                            <dt class="col-sm-3 text-muted">差出人</dt>
+                            <dd class="col-sm-9"><?= Helpers::e($mailHint['from_name'] ?: '—') ?></dd>
+                            <dt class="col-sm-3 text-muted">差出人メール</dt>
+                            <dd class="col-sm-9"><code><?= Helpers::e($mailHint['from_address']) ?></code></dd>
+                            <dt class="col-sm-3 text-muted">宛先メールボックス</dt>
+                            <dd class="col-sm-9"><?= Helpers::e($mb['label']) ?></dd>
+                            <dt class="col-sm-3 text-muted">宛先メール</dt>
+                            <dd class="col-sm-9"><code><?= Helpers::e($mailHint['mailbox_email']) ?></code></dd>
+                            <?php if (!empty($mailHint['subject'])): ?>
+                            <dt class="col-sm-3 text-muted">件名</dt>
+                            <dd class="col-sm-9"><?= Helpers::e($mailHint['subject']) ?></dd>
+                            <?php endif; ?>
+                            <?php $preview = trim($mailHint['body_preview'] ?? ''); if ($preview !== ''): ?>
+                            <dt class="col-sm-3 text-muted">本文プレビュー</dt>
+                            <dd class="col-sm-9 text-muted">
+                                <?= Helpers::e(mb_substr($preview, 0, 100)) ?><?= mb_strlen($preview) > 100 ? '…' : '' ?>
+                            </dd>
+                            <?php endif; ?>
+                        </dl>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
             </div>
@@ -633,5 +733,29 @@ include __DIR__ . '/partials/header.php';
         </form>
     </div>
 </div>
+
+<script>
+// ── ヒントフォーム：既存ルールがある場合、変更時のみ追加ボタンを有効化
+document.querySelectorAll('.hint-add-form[data-has-existing="1"]').forEach(form => {
+    const btn      = form.querySelector('.hint-submit-btn');
+    const origData = JSON.parse(form.dataset.origValues || '{}');
+
+    function checkChanged() {
+        for (const [name, origVal] of Object.entries(origData)) {
+            const el = form.querySelector('[name="' + name + '"]');
+            if (el && el.value !== String(origVal)) {
+                btn.disabled = false;
+                return;
+            }
+        }
+        btn.disabled = true;
+    }
+
+    form.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('input',  checkChanged);
+        el.addEventListener('change', checkChanged);
+    });
+});
+</script>
 
 <?php include __DIR__ . '/partials/footer.php'; ?>

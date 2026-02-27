@@ -76,13 +76,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.querySelectorAll('.notif-eye-btn').forEach(btn => {
-        btn.addEventListener('click', async e => {
-            e.stopPropagation();
-            if (await notifAction(btn.dataset.action, btn.dataset.nid)) fadeRemoveRow(btn);
-        });
-    });
-
     document.querySelectorAll('.notif-delete-btn').forEach(btn => {
         btn.addEventListener('click', async e => {
             e.stopPropagation();

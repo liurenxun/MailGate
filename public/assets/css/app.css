@@ -39,7 +39,10 @@ body {
 .notif-item.notif-read {
     color: #6c757d;
 }
-/* notif-ignored は通常表示と同じ（グレーアウトなし）*/
+.notif-item.notif-ignored {
+    color: #adb5bd;
+    opacity: 0.7;
+}
 
 /* 未読ドット（左端 16px 列）*/
 .notif-dot {
