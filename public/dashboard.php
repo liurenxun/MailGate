@@ -49,6 +49,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Database::query('DELETE FROM notifications WHERE id=?', [$nid]);
         Helpers::json(['ok' => true]);
     }
+    if ($action === 'ignore' && $own()) {
+        Database::query('UPDATE notifications SET is_ignored=1 WHERE id=?', [$nid]);
+        Helpers::json(['ok' => true]);
+    }
+    if ($action === 'unignore' && $own()) {
+        Database::query('UPDATE notifications SET is_ignored=0 WHERE id=?', [$nid]);
+        Helpers::json(['ok' => true]);
+    }
     if ($action === 'empty_trash') {
         Database::query(
             'DELETE FROM notifications WHERE user_id=? AND is_trashed=1',
@@ -207,9 +215,9 @@ function fmtDate(string $datetime): string
     $ts  = strtotime($datetime);
     $dow = ['日','月','火','水','木','金','土'][(int)date('w', $ts)];
     if (date('Y', $ts) === date('Y')) {
-        return date('n/j', $ts) . "({$dow})";
+        return date('n/j', $ts) . "({$dow}) " . date('H:i', $ts);
     }
-    return date('Y/n/j', $ts) . "({$dow})";
+    return date('Y/n/j', $ts) . "({$dow}) " . date('H:i', $ts);
 }
 
 // ── ルールフィルタ選択肢 ──────────────────────────────────────────
@@ -400,7 +408,7 @@ include __DIR__ . '/partials/header.php';
                 </div>
                 <?php else: ?>
                     <?php foreach ($notifications as $n): ?>
-                    <?php $itemClass = $n['is_ignored'] ? 'notif-ignored' : ($n['is_read'] ? 'notif-read' : 'notif-unread'); ?>
+                    <?php $itemClass = $n['is_read'] ? 'notif-read' : 'notif-unread'; ?>
                     <div class="notif-item <?= $itemClass ?>"
                          onclick="location.href='/mail.php?n=<?= (int)$n['id'] ?>'">
                         <!-- 未読ドット -->
@@ -434,6 +442,19 @@ include __DIR__ . '/partials/header.php';
                                 <div class="notif-actions" onclick="event.stopPropagation()">
                                     <span class="notif-time"><?= Helpers::e(fmtDate($n['received_at'])) ?></span>
                                     <?php if (!$viewTrash): ?>
+                                    <?php if ($n['is_ignored']): ?>
+                                    <button class="btn notif-eye-btn"
+                                            data-nid="<?= (int)$n['id'] ?>" data-action="unignore"
+                                            title="無視解除">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <?php else: ?>
+                                    <button class="btn notif-eye-btn"
+                                            data-nid="<?= (int)$n['id'] ?>" data-action="ignore"
+                                            title="無視">
+                                        <i class="bi bi-eye-slash"></i>
+                                    </button>
+                                    <?php endif; ?>
                                     <button class="btn notif-trash-btn"
                                             data-nid="<?= (int)$n['id'] ?>" title="ゴミ箱へ移動">
                                         <i class="bi bi-trash3"></i>
