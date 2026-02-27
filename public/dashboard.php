@@ -172,6 +172,7 @@ $offset = ($page - 1) * $perPage;
 $notifications = Database::fetchAll(
     "SELECT n.id, n.is_read, n.is_ignored, n.matched_rule_id, n.notified_at,
             m.subject, m.from_name, m.from_address, m.received_at,
+            LEFT(IFNULL(m.body_text,''), 200) AS body_preview,
             mb.id AS mailbox_id, mb.label AS mailbox_label,
             (SELECT COUNT(*) FROM attachments
              WHERE mail_id = m.id AND content_id IS NULL) AS attachment_count
@@ -198,6 +199,20 @@ function buildQuery(array $overrides = []): string
     $params = array_merge($base, $overrides);
     $query  = http_build_query(array_filter($params, fn($v) => $v !== ''));
     return $query ? '?' . $query : '';
+}
+
+// ── 受信日時の短縮表示（Outlook スタイル）────────────────────────
+function fmtDate(string $datetime): string
+{
+    $ts  = strtotime($datetime);
+    $dow = ['日','月','火','水','木','金','土'][(int)date('w', $ts)];
+    if (date('Y-m-d', $ts) === date('Y-m-d')) {
+        return $dow . ' ' . date('H:i', $ts);
+    }
+    if (date('Y', $ts) === date('Y')) {
+        return date('n/j', $ts);
+    }
+    return date('Y/n/j', $ts);
 }
 
 // ── ルールフィルタ選択肢 ──────────────────────────────────────────
@@ -378,81 +393,74 @@ include __DIR__ . '/partials/header.php';
                 </form>
             </div>
 
-            <!-- 通知テーブル -->
+            <!-- 通知リスト（Outlook スタイル 3行レイアウト）-->
             <meta name="csrf-token" content="<?= Helpers::e(Auth::csrfToken()) ?>">
-            <div class="table-responsive">
-                <table class="table table-hover mb-0 notif-table">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width:16px"></th>
-                            <th>差出人</th>
-                            <th>件名</th>
-                            <th style="width:130px">メールボックス</th>
-                            <th style="width:130px">受信日時</th>
-                            <th style="width:110px"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php if (empty($notifications)): ?>
-                        <tr>
-                            <td colspan="6" class="text-center text-muted py-5">
-                                <i class="bi bi-inbox display-6 d-block mb-2"></i>
-                                通知はありません
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($notifications as $n): ?>
-                        <?php $rowClass = $n['is_ignored'] ? 'notif-ignored' : ($n['is_read'] ? 'notif-read' : 'notif-unread'); ?>
-                        <tr class="<?= $rowClass ?>"
-                            onclick="location.href='/mail.php?n=<?= (int)$n['id'] ?>'"
-                            style="cursor:pointer">
-                            <td>
-                                <?php if (!$n['is_read']): ?>
-                                    <i class="bi bi-circle-fill text-primary" style="font-size:.5rem"></i>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-truncate" style="max-width:180px">
-                                <?= Helpers::e($n['from_name'] ?: $n['from_address']) ?>
-                            </td>
-                            <td class="notif-subject">
-                                <?= Helpers::e($n['subject'] ?: '（件名なし）') ?>
-                                <?php if ((int)($n['attachment_count'] ?? 0) > 0): ?>
-                                    <i class="bi bi-paperclip text-muted ms-1" title="添付ファイルあり"></i>
-                                <?php endif; ?>
-                                <?php if ($n['is_ignored']): ?>
-                                    <span class="badge bg-secondary ms-1 opacity-50">無視</span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-muted small">
-                                <?= Helpers::e($n['mailbox_label']) ?>
-                            </td>
-                            <td class="text-muted small text-nowrap">
-                                <?= Helpers::e(date('Y/m/d H:i', strtotime($n['received_at']))) ?>
-                            </td>
-                            <td onclick="event.stopPropagation()">
-                                <div class="d-flex gap-1 justify-content-end pe-2">
-                                <?php if (!$viewTrash): ?>
-                                <button class="btn btn-sm btn-outline-secondary notif-trash-btn"
-                                        data-nid="<?= (int)$n['id'] ?>" title="ゴミ箱へ移動">
-                                    <i class="bi bi-trash3"></i>
-                                </button>
-                                <?php else: ?>
-                                <button class="btn btn-sm btn-outline-success notif-restore-btn"
-                                        data-nid="<?= (int)$n['id'] ?>" title="受信箱に戻す">
-                                    <i class="bi bi-arrow-counterclockwise"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-danger notif-delete-btn"
-                                        data-nid="<?= (int)$n['id'] ?>" title="完全削除">
-                                    <i class="bi bi-trash3-fill"></i>
-                                </button>
-                                <?php endif; ?>
+            <div class="notif-list">
+                <?php if (empty($notifications)): ?>
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox display-6 d-block mb-2"></i>
+                    通知はありません
+                </div>
+                <?php else: ?>
+                    <?php foreach ($notifications as $n): ?>
+                    <?php $itemClass = $n['is_ignored'] ? 'notif-ignored' : ($n['is_read'] ? 'notif-read' : 'notif-unread'); ?>
+                    <div class="notif-item <?= $itemClass ?>"
+                         onclick="location.href='/mail.php?n=<?= (int)$n['id'] ?>'">
+                        <!-- 未読ドット -->
+                        <div class="notif-dot">
+                            <?php if (!$n['is_read'] && !$n['is_ignored']): ?>
+                                <i class="bi bi-circle-fill text-primary"></i>
+                            <?php endif; ?>
+                        </div>
+                        <!-- コンテンツ -->
+                        <div class="notif-content">
+                            <!-- 1行目: 差出人 | 宛先メールボックス -->
+                            <div class="notif-row1">
+                                <span class="notif-from">
+                                    <?= Helpers::e($n['from_name'] ?: $n['from_address']) ?>
+                                </span>
+                                <span class="notif-to">
+                                    To:&nbsp;<?= Helpers::e($n['mailbox_label']) ?>
+                                </span>
+                            </div>
+                            <!-- 2行目: 件名 | 受信日時 + アクション -->
+                            <div class="notif-row2">
+                                <span class="notif-subject">
+                                    <?= Helpers::e($n['subject'] ?: '（件名なし）') ?>
+                                    <?php if ((int)($n['attachment_count'] ?? 0) > 0): ?>
+                                        <i class="bi bi-paperclip ms-1" title="添付ファイルあり"></i>
+                                    <?php endif; ?>
+                                    <?php if ($n['is_ignored']): ?>
+                                        <span class="badge bg-secondary ms-1 opacity-50">無視</span>
+                                    <?php endif; ?>
+                                </span>
+                                <div class="notif-actions" onclick="event.stopPropagation()">
+                                    <span class="notif-time"><?= Helpers::e(fmtDate($n['received_at'])) ?></span>
+                                    <?php if (!$viewTrash): ?>
+                                    <button class="btn notif-trash-btn"
+                                            data-nid="<?= (int)$n['id'] ?>" title="ゴミ箱へ移動">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                    <?php else: ?>
+                                    <button class="btn notif-restore-btn"
+                                            data-nid="<?= (int)$n['id'] ?>" title="受信箱に戻す">
+                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                    </button>
+                                    <button class="btn notif-delete-btn"
+                                            data-nid="<?= (int)$n['id'] ?>" title="完全削除">
+                                        <i class="bi bi-trash3-fill"></i>
+                                    </button>
+                                    <?php endif; ?>
                                 </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+                            </div>
+                            <!-- 3行目: 本文プレビュー -->
+                            <div class="notif-preview">
+                                <?= Helpers::e(mb_substr(trim($n['body_preview'] ?? ''), 0, 150)) ?>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
 
             <!-- ページネーション -->

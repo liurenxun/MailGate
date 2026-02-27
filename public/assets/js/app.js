@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fadeRemoveRow(btn) {
-        const row = btn.closest('tr');
+        const row = btn.closest('.notif-item');
         if (!row) return;
         row.style.transition = 'opacity .3s';
         row.style.opacity = '0';
