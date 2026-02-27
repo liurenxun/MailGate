@@ -206,13 +206,10 @@ function fmtDate(string $datetime): string
 {
     $ts  = strtotime($datetime);
     $dow = ['日','月','火','水','木','金','土'][(int)date('w', $ts)];
-    if (date('Y-m-d', $ts) === date('Y-m-d')) {
-        return $dow . ' ' . date('H:i', $ts);
-    }
     if (date('Y', $ts) === date('Y')) {
-        return date('n/j', $ts);
+        return date('n/j', $ts) . "({$dow})";
     }
-    return date('Y/n/j', $ts);
+    return date('Y/n/j', $ts) . "({$dow})";
 }
 
 // ── ルールフィルタ選択肢 ──────────────────────────────────────────
