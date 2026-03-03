@@ -153,15 +153,41 @@ body {
 .mailbox-sidebar .list-group-item:not(.active):hover {
     background-color: #f8f9fa;
 }
-.mailbox-sidebar .list-group-item[draggable="true"] {
-    cursor: grab;
-}
-.mailbox-sidebar .list-group-item.mb-dragging {
+.mailbox-sidebar .mb-sidebar-group.mb-dragging {
     opacity: 0.35;
 }
-.mailbox-sidebar .list-group-item.mb-drag-over {
+.mailbox-sidebar .mb-sidebar-group.mb-drag-over {
     border-top: 2px solid #0d6efd;
     background-color: #e8f0fe;
+}
+
+/* ── ルールトグルボタン ────────────────────────────────────────── */
+.mb-rule-toggle {
+    flex-shrink: 0;
+    width: 26px;
+    padding: 0;
+    border: none;
+    border-bottom: 1px solid #dee2e6;
+    border-left: 1px solid #dee2e6;
+    background: #f8f9fa;
+    color: #adb5bd;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color .12s, color .12s;
+}
+.mb-rule-toggle:hover,
+.mb-rule-toggle-active {
+    background-color: #e9f0ff;
+    color: #0d6efd;
+}
+
+/* ── サイドバー ルールアイテム ─────────────────────────────────── */
+.rule-sidebar-item {
+    padding-left: 1.75rem !important;
+    font-size: 0.8rem;
 }
 
 /* ── メール詳細 ─────────────────────────────────────────────────── */

@@ -241,17 +241,7 @@ foreach ($mailboxes as $_mb) {
              VALUES (?, '全部無視', 'global', NULL, 'any', '*', 'ignore', 999, ?)",
             [$_mb['id'], (int)$user['id']]
         );
-        $_ruleId = Database::lastInsertId();
-        $_subs = Database::fetchAll(
-            'SELECT user_id FROM subscriptions WHERE mailbox_id=?',
-            [$_mb['id']]
-        );
-        foreach ($_subs as $_sub) {
-            Database::query(
-                'INSERT IGNORE INTO rule_exclusions (rule_id, user_id) VALUES (?,?)',
-                [$_ruleId, $_sub['user_id']]
-            );
-        }
+        // rule_exclusions は作成しない → 全購読者にデフォルト「有効」で適用
     }
 }
 

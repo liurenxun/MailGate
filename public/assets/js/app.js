@@ -84,13 +84,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ── メールボックスサイドバー ドラッグ並び替え ────────────────────
+    // ── メールボックスサイドバー：ルール折りたたみ + ドラッグ並び替え ─
     const mbSidebar = document.querySelector('.mailbox-sidebar .list-group');
     if (mbSidebar) {
+        // ルール折りたたみトグル
+        mbSidebar.querySelectorAll('.mb-rule-toggle').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const target = document.getElementById(btn.dataset.target);
+                if (!target) return;
+                const icon  = btn.querySelector('i');
+                const shown = target.style.display !== 'none';
+                target.style.display = shown ? 'none' : 'block';
+                icon.className = shown ? 'bi bi-plus' : 'bi bi-dash';
+            });
+        });
+
+        // ドラッグ並び替え（.mb-sidebar-group 単位）
         let dragSrc = null;
 
-        mbSidebar.querySelectorAll('[draggable="true"]').forEach(item => {
+        mbSidebar.querySelectorAll('.mb-sidebar-group[draggable="true"]').forEach(item => {
             item.addEventListener('dragstart', e => {
+                if (e.target.closest('.mb-rule-collapse')) { e.preventDefault(); return; }
                 dragSrc = item;
                 e.dataTransfer.effectAllowed = 'move';
                 setTimeout(() => item.classList.add('mb-dragging'), 0);
@@ -106,15 +122,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 mbSidebar.querySelectorAll('.mb-drag-over').forEach(el => el.classList.remove('mb-drag-over'));
                 if (dragSrc && item !== dragSrc) item.classList.add('mb-drag-over');
             });
-            item.addEventListener('dragleave', () => {
-                item.classList.remove('mb-drag-over');
+            item.addEventListener('dragleave', e => {
+                if (!item.contains(e.relatedTarget)) item.classList.remove('mb-drag-over');
             });
             item.addEventListener('drop', e => {
                 e.preventDefault();
                 if (!dragSrc || dragSrc === item) return;
                 item.classList.remove('mb-drag-over');
                 // DOM 並び替え
-                const items = [...mbSidebar.querySelectorAll('[draggable="true"]')];
+                const items = [...mbSidebar.querySelectorAll('.mb-sidebar-group[draggable="true"]')];
                 const srcIdx = items.indexOf(dragSrc);
                 const dstIdx = items.indexOf(item);
                 if (srcIdx < dstIdx) {
@@ -123,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     mbSidebar.insertBefore(dragSrc, item);
                 }
                 // サーバーへ順番を保存
-                const ids = [...mbSidebar.querySelectorAll('[data-mailbox-id]')]
+                const ids = [...mbSidebar.querySelectorAll('.mb-sidebar-group[data-mailbox-id]')]
                     .map(el => el.dataset.mailboxId);
                 fetch('/dashboard.php', {
                     method: 'POST',

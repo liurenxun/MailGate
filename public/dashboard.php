@@ -235,15 +235,12 @@ function fmtDate(string $datetime): string
     return date('Y/n/j', $ts) . "({$dow}) " . date('H:i', $ts);
 }
 
-// ── ルールフィルタ選択肢 ──────────────────────────────────────────
-$filterRuleOptions = [];
-if (!$viewTrash) {  // 通常ビュー・無視ビュー両方で表示
-    $mbCond   = $filterMailbox > 0 ? 'AND r.mailbox_id=?' : '';
-    $mbParams = $filterMailbox > 0 ? [$filterMailbox] : [];
-    $filterRuleOptions = Database::fetchAll(
-        "SELECT r.id, r.label, r.scope, mb.label AS mailbox_label
+// ── サイドバー用ルール（メールボックス別に整理）──────────────────
+$rulesByMailbox = [];
+if (!$viewTrash) {
+    $allRules = Database::fetchAll(
+        "SELECT r.id, r.label, r.scope, r.mailbox_id
          FROM rules r
-         INNER JOIN monitored_mailboxes mb ON mb.id = r.mailbox_id
          INNER JOIN subscriptions s ON s.mailbox_id = r.mailbox_id AND s.user_id = ?
          WHERE (
              (r.scope='personal' AND r.user_id=?)
@@ -254,10 +251,25 @@ if (!$viewTrash) {  // 通常ビュー・無視ビュー両方で表示
          )
          AND NOT (r.match_field='any' AND r.match_pattern='*'
                   AND r.action='ignore' AND r.priority=999)
-         {$mbCond}
-         ORDER BY mb.label ASC, r.scope DESC, r.label ASC",
-        array_merge([(int)$user['id'], (int)$user['id'], (int)$user['id']], $mbParams)
+         ORDER BY r.scope DESC, r.label ASC",
+        [(int)$user['id'], (int)$user['id'], (int)$user['id']]
     );
+    foreach ($allRules as $r) {
+        $rulesByMailbox[(int)$r['mailbox_id']][] = $r;
+    }
+}
+
+// 現在選択中ルールのメールボックス ID（自動展開用）
+$expandedMailboxId = 0;
+if ($filterRule > 0) {
+    foreach ($rulesByMailbox as $mbId => $mbRuleList) {
+        foreach ($mbRuleList as $r) {
+            if ((int)$r['id'] === $filterRule) {
+                $expandedMailboxId = $mbId;
+                break 2;
+            }
+        }
+    }
 }
 
 include __DIR__ . '/partials/header.php';
@@ -271,26 +283,55 @@ include __DIR__ . '/partials/header.php';
             <div class="card-header bg-white fw-semibold py-2 small text-uppercase text-muted">
                 メールボックス
             </div>
-            <div class="list-group list-group-flush">
-                <a href="/dashboard.php<?= buildQuery(['mailbox' => '', 'page' => '1']) ?>"
+            <div class="list-group list-group-flush" id="mb-sidebar-list">
+                <a href="/dashboard.php<?= buildQuery(['mailbox' => '', 'rule' => '', 'page' => '1']) ?>"
                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center
                           <?= $filterMailbox === 0 ? 'active' : '' ?>">
                     <span><i class="bi bi-inbox me-1"></i> すべて</span>
                 </a>
                 <?php foreach ($mailboxes as $mb): ?>
-                <a href="/dashboard.php<?= buildQuery(['mailbox' => $mb['id'], 'page' => '1']) ?>"
-                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-center
-                          <?= $filterMailbox === (int)$mb['id'] ? 'active' : '' ?>"
-                   draggable="true"
-                   data-mailbox-id="<?= (int)$mb['id'] ?>">
-                    <span class="text-truncate" style="max-width:120px"
-                          title="<?= Helpers::e($mb['email_address']) ?>">
-                        <?= Helpers::e($mb['label']) ?>
-                    </span>
-                    <?php if ($mb['unread_count'] > 0): ?>
-                        <span class="badge bg-primary rounded-pill"><?= (int)$mb['unread_count'] ?></span>
+                <?php
+                $mbId       = (int)$mb['id'];
+                $mbRules    = $rulesByMailbox[$mbId] ?? [];
+                $mbActive   = $filterMailbox === $mbId;
+                $mbExpanded = $expandedMailboxId === $mbId;
+                ?>
+                <div class="mb-sidebar-group" draggable="true" data-mailbox-id="<?= $mbId ?>">
+                    <div class="d-flex align-items-stretch">
+                        <a href="/dashboard.php<?= buildQuery(['mailbox' => $mbId, 'rule' => '', 'page' => '1']) ?>"
+                           draggable="false"
+                           class="list-group-item list-group-item-action flex-grow-1
+                                  d-flex justify-content-between align-items-center
+                                  <?= $mbActive ? 'active' : '' ?>">
+                            <span class="text-truncate" style="max-width:100px"
+                                  title="<?= Helpers::e($mb['email_address']) ?>">
+                                <?= Helpers::e($mb['label']) ?>
+                            </span>
+                            <?php if ($mb['unread_count'] > 0): ?>
+                                <span class="badge bg-primary rounded-pill ms-1"><?= (int)$mb['unread_count'] ?></span>
+                            <?php endif; ?>
+                        </a>
+                        <?php if (!empty($mbRules)): ?>
+                        <button class="mb-rule-toggle <?= $mbActive ? 'mb-rule-toggle-active' : '' ?>"
+                                data-target="rules-<?= $mbId ?>">
+                            <i class="bi <?= $mbExpanded ? 'bi-dash' : 'bi-plus' ?>"></i>
+                        </button>
+                        <?php endif; ?>
+                    </div>
+                    <?php if (!empty($mbRules)): ?>
+                    <div class="mb-rule-collapse" id="rules-<?= $mbId ?>"
+                         <?= $mbExpanded ? '' : 'style="display:none"' ?>>
+                        <?php foreach ($mbRules as $ro): ?>
+                        <a href="/dashboard.php<?= buildQuery(['mailbox' => $mbId, 'rule' => $ro['id'], 'page' => '1']) ?>"
+                           draggable="false"
+                           class="list-group-item list-group-item-action rule-sidebar-item
+                                  <?= $filterRule === (int)$ro['id'] ? 'active' : '' ?>">
+                            <i class="bi bi-dot"></i><?= Helpers::e(($ro['scope'] === 'global' ? '[G] ' : '') . $ro['label']) ?>
+                        </a>
+                        <?php endforeach; ?>
+                    </div>
                     <?php endif; ?>
-                </a>
+                </div>
                 <?php endforeach; ?>
             </div>
         </div>
@@ -318,21 +359,6 @@ include __DIR__ . '/partials/header.php';
                                 <?= $filterRead === '0' ? 'selected' : '' ?>>未読</option>
                         <option value="/dashboard.php<?= buildQuery(['read' => '1', 'page' => '1']) ?>"
                                 <?= $filterRead === '1' ? 'selected' : '' ?>>既読</option>
-                    </select>
-                    <?php endif; ?>
-
-                    <?php if (!$viewTrash && !empty($filterRuleOptions)): ?>
-                    <select class="form-select form-select-sm" style="width:auto"
-                            onchange="location.href=this.value">
-                        <option value="/dashboard.php<?= buildQuery(['rule' => '', 'page' => '1']) ?>"
-                                <?= $filterRule === 0 ? 'selected' : '' ?>>受信ルール: すべて</option>
-                        <?php foreach ($filterRuleOptions as $ro): ?>
-                        <option value="/dashboard.php<?= buildQuery(['rule' => $ro['id'], 'page' => '1']) ?>"
-                                <?= $filterRule === (int)$ro['id'] ? 'selected' : '' ?>>
-                            <?= Helpers::e(($ro['scope'] === 'global' ? '[G] ' : '') . $ro['label']
-                                . ($filterMailbox === 0 ? ' — ' . $ro['mailbox_label'] : '')) ?>
-                        </option>
-                        <?php endforeach; ?>
                     </select>
                     <?php endif; ?>
 
