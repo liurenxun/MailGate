@@ -270,14 +270,14 @@ if ($selectedMailboxId) {
     }
 }
 
-// 購読しているアクティブユーザー一覧（personal タブ用）
+// 購読しているユーザー一覧（active + pending 両方対象、personal タブ用）
 $subscribers = [];
 if ($selectedMailboxId) {
     $subscribers = Database::fetchAll(
-        "SELECT u.id, u.name, u.email
+        "SELECT u.id, u.name, u.email, u.status
          FROM users u
          INNER JOIN subscriptions s ON s.user_id = u.id
-         WHERE s.mailbox_id = ? AND u.status = 'active'
+         WHERE s.mailbox_id = ? AND u.status IN ('active','pending')
          ORDER BY u.name ASC",
         [$selectedMailboxId]
     );
@@ -326,7 +326,7 @@ if ($selectedMailboxId) {
 }
 
 $targetUser = $targetUid
-    ? Database::fetchOne('SELECT id, name, email FROM users WHERE id = ?', [$targetUid])
+    ? Database::fetchOne('SELECT id, name, email, status FROM users WHERE id = ?', [$targetUid])
     : null;
 
 include __DIR__ . '/../partials/header.php';
@@ -629,7 +629,7 @@ function renderProxySystemRuleTable(array $globalRules, int $mailboxId, int $tar
                     <?php foreach ($subscribers as $sub): ?>
                     <option value="<?= (int)$sub['id'] ?>"
                             <?= (int)$sub['id'] === $targetUid ? 'selected' : '' ?>>
-                        <?= Helpers::e($sub['name']) ?> (<?= Helpers::e($sub['email']) ?>)
+                        <?= Helpers::e($sub['name']) ?> (<?= Helpers::e($sub['email']) ?>)<?= $sub['status'] === 'pending' ? ' [未設定]' : '' ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -639,6 +639,9 @@ function renderProxySystemRuleTable(array $globalRules, int $mailboxId, int $tar
             <div class="alert alert-light border py-2 small mb-3">
                 <i class="bi bi-person-gear"></i>
                 <strong><?= Helpers::e($targetUser['name']) ?></strong> さんの個人ルール（管理者による代理設定）
+                <?php if ($targetUser['status'] === 'pending'): ?>
+                <span class="badge bg-warning text-dark ms-1">パスワード未設定</span>
+                <?php endif; ?>
             </div>
 
             <!-- システムルール（グローバルルール + 対象ユーザー除外トグル）-->
