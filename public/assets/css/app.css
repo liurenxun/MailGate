@@ -161,27 +161,22 @@ body {
     background-color: #e8f0fe;
 }
 
-/* ── ルールトグルボタン ────────────────────────────────────────── */
-.mb-rule-toggle {
-    flex-shrink: 0;
-    width: 26px;
-    padding: 0;
-    border: none;
-    border-bottom: 1px solid #dee2e6;
-    border-right: 1px solid #dee2e6;
-    background: #f8f9fa;
+/* ── サイドバー メールボックス行 アイコン ────────────────────── */
+.mb-rule-icon {
+    font-size: 0.75rem;
     color: #adb5bd;
-    font-size: 0.8rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color .12s, color .12s;
+    width: 0.9rem;
+    text-align: center;
 }
-.mb-rule-toggle:hover,
-.mb-rule-toggle-active {
-    background-color: #e9f0ff;
+.list-group-item:not(.active):hover .mb-rule-icon {
+    color: #6c757d;
+}
+.list-group-item.active .mb-rule-icon {
     color: #0d6efd;
+}
+.mb-rule-icon-spacer {
+    display: inline-block;
+    width: 0.9rem;
 }
 
 /* ── サイドバー ルールアイテム ─────────────────────────────────── */

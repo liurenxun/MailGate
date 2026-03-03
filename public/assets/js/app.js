@@ -87,17 +87,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── メールボックスサイドバー：ルール折りたたみ + ドラッグ並び替え ─
     const mbSidebar = document.querySelector('.mailbox-sidebar .list-group');
     if (mbSidebar) {
-        // ルール折りたたみトグル
-        mbSidebar.querySelectorAll('.mb-rule-toggle').forEach(btn => {
-            btn.addEventListener('click', e => {
+        // メールボックス行クリック：ルール折りたたみ or ナビゲーション
+        mbSidebar.querySelectorAll('.mb-sidebar-row').forEach(row => {
+            row.addEventListener('click', e => {
                 e.preventDefault();
-                e.stopPropagation();
-                const target = document.getElementById(btn.dataset.target);
-                if (!target) return;
-                const icon  = btn.querySelector('i');
-                const shown = target.style.display !== 'none';
-                target.style.display = shown ? 'none' : 'block';
-                icon.className = shown ? 'bi bi-plus' : 'bi bi-dash';
+                const collapse = document.getElementById(row.dataset.target);
+                const icon = row.querySelector('.mb-rule-icon');
+                if (!collapse) { window.location.href = row.href; return; }
+                const shown = collapse.style.display !== 'none';
+                if (shown) {
+                    collapse.style.display = 'none';
+                    if (icon) icon.className = 'bi bi-plus-square mb-rule-icon flex-shrink-0';
+                    window.location.href = row.href;
+                } else {
+                    collapse.style.display = 'block';
+                    if (icon) icon.className = 'bi bi-dash-square mb-rule-icon flex-shrink-0';
+                }
             });
         });
 

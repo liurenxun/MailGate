@@ -290,31 +290,28 @@ include __DIR__ . '/partials/header.php';
                 <?php
                 $mbId       = (int)$mb['id'];
                 $mbRules    = $rulesByMailbox[$mbId] ?? [];
-                $mbActive   = $filterMailbox === $mbId;
+                $mbActive   = $filterMailbox === $mbId && $filterRule === 0;
                 $mbExpanded = $expandedMailboxId === $mbId;
                 ?>
                 <div class="mb-sidebar-group" draggable="true" data-mailbox-id="<?= $mbId ?>">
-                    <div class="d-flex align-items-stretch">
+                    <a href="/dashboard.php<?= buildQuery(['mailbox' => $mbId, 'rule' => '', 'page' => '1']) ?>"
+                       draggable="false"
+                       class="list-group-item list-group-item-action d-flex align-items-center gap-1
+                              <?= $mbActive ? 'active' : '' ?><?= !empty($mbRules) ? ' mb-sidebar-row' : '' ?>"
+                       <?= !empty($mbRules) ? 'data-target="rules-' . $mbId . '"' : '' ?>>
                         <?php if (!empty($mbRules)): ?>
-                        <button class="mb-rule-toggle <?= $mbActive ? 'mb-rule-toggle-active' : '' ?>"
-                                data-target="rules-<?= $mbId ?>">
-                            <i class="bi <?= $mbExpanded ? 'bi-dash' : 'bi-plus' ?>"></i>
-                        </button>
+                        <i class="bi <?= $mbExpanded ? 'bi-dash-square' : 'bi-plus-square' ?> mb-rule-icon flex-shrink-0"></i>
+                        <?php else: ?>
+                        <i class="mb-rule-icon-spacer flex-shrink-0"></i>
                         <?php endif; ?>
-                        <a href="/dashboard.php<?= buildQuery(['mailbox' => $mbId, 'rule' => '', 'page' => '1']) ?>"
-                           draggable="false"
-                           class="list-group-item list-group-item-action flex-grow-1
-                                  d-flex justify-content-between align-items-center
-                                  <?= $mbActive ? 'active' : '' ?>">
-                            <span class="text-truncate" style="max-width:100px"
-                                  title="<?= Helpers::e($mb['email_address']) ?>">
-                                <?= Helpers::e($mb['label']) ?>
-                            </span>
-                            <?php if ($mb['unread_count'] > 0): ?>
-                                <span class="badge bg-primary rounded-pill ms-1"><?= (int)$mb['unread_count'] ?></span>
-                            <?php endif; ?>
-                        </a>
-                    </div>
+                        <span class="text-truncate flex-grow-1"
+                              title="<?= Helpers::e($mb['email_address']) ?>">
+                            <?= Helpers::e($mb['label']) ?>
+                        </span>
+                        <?php if ($mb['unread_count'] > 0): ?>
+                            <span class="badge bg-primary rounded-pill"><?= (int)$mb['unread_count'] ?></span>
+                        <?php endif; ?>
+                    </a>
                     <?php if (!empty($mbRules)): ?>
                     <div class="mb-rule-collapse" id="rules-<?= $mbId ?>"
                          <?= $mbExpanded ? '' : 'style="display:none"' ?>>
