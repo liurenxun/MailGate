@@ -36,12 +36,9 @@ body {
 .notif-item.notif-unread:hover {
     background-color: #ddeaff;
 }
-.notif-item.notif-read {
-    color: #6c757d;
-}
 .notif-item.notif-ignored {
-    color: #adb5bd;
-    opacity: 0.7;
+    color: #6c757d;
+    opacity: 0.75;
 }
 
 /* 未読ドット（左端 16px 列）*/
