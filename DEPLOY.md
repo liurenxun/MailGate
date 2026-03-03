@@ -387,6 +387,21 @@ ALTER TABLE `notifications`
 
 ---
 
+### user_mailbox_order テーブル追加（ダッシュボード サイドバー並び替え機能）
+
+```sql
+CREATE TABLE IF NOT EXISTS `user_mailbox_order` (
+    `user_id`    INT UNSIGNED      NOT NULL,
+    `mailbox_id` INT UNSIGNED      NOT NULL,
+    `sort_order` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (`user_id`, `mailbox_id`),
+    CONSTRAINT `fk_umo_user`    FOREIGN KEY (`user_id`)    REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_umo_mailbox` FOREIGN KEY (`mailbox_id`) REFERENCES `monitored_mailboxes` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
 ## 6. 创建配置文件
 
 ```bash

@@ -425,7 +425,7 @@ include __DIR__ . '/partials/header.php';
                 </div>
                 <?php else: ?>
                     <?php foreach ($notifications as $n): ?>
-                    <?php $itemClass = ($n['is_ignored'] && !$viewIgnored) ? 'notif-ignored' : ($n['is_read'] ? 'notif-read' : 'notif-unread'); ?>
+                    <?php $itemClass = $n['is_read'] ? 'notif-read' : 'notif-unread'; ?>
                     <div class="notif-item <?= $itemClass ?>"
                          onclick="location.href='/mail.php?n=<?= (int)$n['id'] ?>'">
                         <!-- 未読ドット -->

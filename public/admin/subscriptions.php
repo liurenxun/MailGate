@@ -87,12 +87,12 @@ if ($selectedMailboxId) {
 
     $subscribedIds = array_column($subscribedUsers, 'id');
 
-    // まだ購読していないアクティブなユーザー
-    $allActiveUsers = Database::fetchAll(
-        "SELECT id, name, email FROM users WHERE status = 'active' ORDER BY name ASC"
+    // まだ購読していないユーザー（active + pending 両方対象）
+    $allUsers = Database::fetchAll(
+        "SELECT id, name, email, status FROM users WHERE status IN ('active','pending') ORDER BY name ASC"
     );
     $availableUsers = array_filter(
-        $allActiveUsers,
+        $allUsers,
         fn($u) => !in_array((int)$u['id'], $subscribedIds, true)
     );
 }
@@ -183,9 +183,13 @@ include __DIR__ . '/partials/subnav.php';
                             </span>
                         </td>
                         <td class="text-center">
-                            <span class="badge <?= $u['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                                <?= $u['status'] === 'active' ? '有効' : $u['status'] ?>
-                            </span>
+                            <?php if ($u['status'] === 'active'): ?>
+                                <span class="badge bg-success">有効</span>
+                            <?php elseif ($u['status'] === 'pending'): ?>
+                                <span class="badge bg-warning text-dark">未設定</span>
+                            <?php else: ?>
+                                <span class="badge bg-secondary"><?= Helpers::e($u['status']) ?></span>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <form method="post" class="m-0">
@@ -217,7 +221,7 @@ include __DIR__ . '/partials/subnav.php';
                         <option value="">— ユーザーを選択 —</option>
                         <?php foreach ($availableUsers as $u): ?>
                         <option value="<?= (int)$u['id'] ?>">
-                            <?= Helpers::e($u['name']) ?>（<?= Helpers::e($u['email']) ?>）
+                            <?= Helpers::e($u['name']) ?>（<?= Helpers::e($u['email']) ?>）<?= $u['status'] === 'pending' ? ' ［未設定］' : '' ?>
                         </option>
                         <?php endforeach; ?>
                     </select>

@@ -36,10 +36,6 @@ body {
 .notif-item.notif-unread:hover {
     background-color: #ddeaff;
 }
-.notif-item.notif-ignored {
-    color: #6c757d;
-    opacity: 0.75;
-}
 
 /* 未読ドット（左端 16px 列）*/
 .notif-dot {

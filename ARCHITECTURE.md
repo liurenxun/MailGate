@@ -148,6 +148,17 @@ MailGate/
 | `created_at` | DATETIME | |
 | UNIQUE KEY | (mailbox_id, user_id) | |
 
+### `user_mailbox_order` — ユーザーごとのサイドバー表示順
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `user_id` | INT FK → users (CASCADE) | |
+| `mailbox_id` | INT FK → monitored_mailboxes (CASCADE) | |
+| `sort_order` | SMALLINT UNSIGNED DEFAULT 0 | 数字小が先、ドラッグ＆ドロップで更新 |
+| PRIMARY KEY | (user_id, mailbox_id) | |
+
+> 未設定（レコードなし）のメールボックスは `COALESCE(sort_order, 99999)` によりラベル昇順で末尾に表示される。ユーザーがドラッグ操作を行った時点で AJAX により保存される。
+
 ### `rules` — 规则
 
 | 列 | 类型 | 说明 |
@@ -411,7 +422,7 @@ cron/fetch.php
 
 | 页面 | 功能 |
 |---|---|
-| `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索、差出人/発信サーバーソート、ゴミ箱（移動・復元・完全削除）|
+| `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索、差出人/発信サーバーソート、ゴミ箱（移動・復元・完全削除）；サイドバーのメールボックスをドラッグ＆ドロップで個人の表示順に並び替え可（AJAX保存）|
 | `mail.php?n={nid}` | 邮件详情（校验当前用户是否在该通知记录中），HTML 正文用 iframe sandbox |
 | `my-rules.php` | 個人ルール管理（購読中の各メールボックスごとに設定）+ システムルール（グローバル）閲覧・適用トグル |
 | `my-settings.php` | 修改通知邮件地址、修改密码 |
