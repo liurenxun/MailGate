@@ -110,6 +110,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Helpers::redirect('/admin/mailboxes.php');
     }
 
+    // ── 表示順変更（▲/▼）─────────────────────────────────────────────
+    if ($action === 'reorder') {
+        $id        = (int)($_POST['mailbox_id'] ?? 0);
+        $direction = $_POST['direction'] ?? '';
+        if ($id > 0 && in_array($direction, ['up', 'down'], true)) {
+            $all = Database::fetchAll(
+                'SELECT id FROM monitored_mailboxes ORDER BY sort_order ASC, label ASC, id ASC'
+            );
+            $pos = null;
+            foreach ($all as $i => $row) {
+                if ((int)$row['id'] === $id) { $pos = $i; break; }
+            }
+            $swapPos = $direction === 'up' ? $pos - 1 : $pos + 1;
+            if ($pos !== null && $swapPos >= 0 && $swapPos < count($all)) {
+                [$all[$pos], $all[$swapPos]] = [$all[$swapPos], $all[$pos]];
+                foreach ($all as $i => $row) {
+                    Database::query(
+                        'UPDATE monitored_mailboxes SET sort_order = ? WHERE id = ?',
+                        [($i + 1) * 10, (int)$row['id']]
+                    );
+                }
+                $_SESSION['flash'] = ['success', '表示順を変更しました。'];
+            }
+        }
+        Helpers::redirect('/admin/mailboxes.php');
+    }
+
     // ── 接続テスト ─────────────────────────────────────────────────
     if ($action === 'test') {
         $id = (int)($_POST['mailbox_id'] ?? 0);
@@ -153,7 +180,7 @@ $mailboxes = Database::fetchAll(
      FROM monitored_mailboxes mb
      LEFT JOIN subscriptions s ON s.mailbox_id = mb.id
      GROUP BY mb.id
-     ORDER BY mb.label ASC'
+     ORDER BY mb.sort_order ASC, mb.label ASC, mb.id ASC'
 );
 
 // 編集時：対象レコード取得
@@ -316,6 +343,7 @@ include __DIR__ . '/partials/subnav.php';
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
+                    <th style="width:70px" class="text-center">順</th>
                     <th>表示名</th>
                     <th>メールアドレス</th>
                     <th class="text-center">購読者</th>
@@ -333,8 +361,32 @@ include __DIR__ . '/partials/subnav.php';
                     </td>
                 </tr>
             <?php else: ?>
-                <?php foreach ($mailboxes as $mb): ?>
+                <?php $mbCount = count($mailboxes); foreach ($mailboxes as $mbIdx => $mb): ?>
                 <tr>
+                    <td class="text-center">
+                        <div class="d-flex flex-column gap-1 align-items-center">
+                            <form method="post" class="m-0">
+                                <input type="hidden" name="action"     value="reorder">
+                                <input type="hidden" name="mailbox_id" value="<?= (int)$mb['id'] ?>">
+                                <input type="hidden" name="direction"  value="up">
+                                <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                        title="上へ" <?= $mbIdx === 0 ? 'disabled' : '' ?>>
+                                    <i class="bi bi-chevron-up"></i>
+                                </button>
+                            </form>
+                            <form method="post" class="m-0">
+                                <input type="hidden" name="action"     value="reorder">
+                                <input type="hidden" name="mailbox_id" value="<?= (int)$mb['id'] ?>">
+                                <input type="hidden" name="direction"  value="down">
+                                <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                        title="下へ" <?= $mbIdx === $mbCount - 1 ? 'disabled' : '' ?>>
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
                     <td>
                         <div class="fw-semibold"><?= Helpers::e($mb['label']) ?></div>
                         <div class="small text-muted"><?= Helpers::e($mb['imap_host']) ?></div>

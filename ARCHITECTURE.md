@@ -42,9 +42,11 @@
 ```
 MailGate/
 ├── public/                      # Apache DocumentRoot
-│   ├── index.php                # 登录页
+│   ├── index.php                # 登录页（含忘记密码 / 初次设密）
 │   ├── dashboard.php            # 收件通知列表（员工首页）
 │   ├── mail.php                 # 邮件详情
+│   ├── download.php             # 附件下载（鉴权后 readfile 输出）
+│   ├── logout.php               # 登出
 │   ├── my-rules.php             # 员工：自定义规则管理
 │   ├── my-settings.php          # 员工：账户设置
 │   │
@@ -53,18 +55,27 @@ MailGate/
 │   │   ├── users.php            # 管理员工账号
 │   │   ├── rules.php            # グローバル・個人ルール管理
 │   │   ├── subscriptions.php    # 分配：哪个员工订阅哪个邮箱
-│   │   └── settings.php        # 系统设置（SMTP等）
+│   │   ├── settings.php         # 系统设置（SMTP等）
+│   │   ├── audit.php            # 操作审计日志
+│   │   └── partials/
+│   │       └── subnav.php       # 管理员子导航
+│   │
+│   ├── partials/
+│   │   ├── header.php           # 公用头部（含未读 Badge）
+│   │   └── footer.php           # 公用尾部
 │   │
 │   └── assets/
 │       ├── css/
 │       └── js/
 │
 ├── src/
-│   ├── Auth.php                 # 登录/Session/初次设密码
+│   ├── bootstrap.php            # 所有 public/*.php 统一入口
+│   ├── Auth.php                 # 登录/Session/初次设密码/忘记密码
 │   ├── Fetcher.php              # IMAP 拉取邮件
 │   ├── Classifier.php           # 规则匹配引擎
 │   ├── Notifier.php             # 发送通知邮件
 │   ├── Mailer.php               # 邮件发送封装（支持 mail() / SMTP）
+│   ├── AuditLog.php             # 操作审计日志记录
 │   ├── Database.php             # PDO 封装
 │   └── Helpers.php
 │
@@ -104,6 +115,7 @@ MailGate/
 | `reset_token_expires` | DATETIME NULL | |
 | `notify_email` | VARCHAR(255) NULL | 通知送达地址（为空则用 email 字段）|
 | `created_at` | DATETIME | |
+| `updated_at` | DATETIME | ON UPDATE CURRENT_TIMESTAMP |
 
 ### `monitored_mailboxes` — 被监控的共用邮箱
 
@@ -117,9 +129,13 @@ MailGate/
 | `imap_encryption` | ENUM('ssl','tls','none') | 默认 ssl |
 | `imap_user` | VARCHAR(255) | |
 | `imap_pass_enc` | TEXT | AES-256 加密 |
+| `imap_folder` | VARCHAR(255) DEFAULT 'INBOX' | 监控的邮件夹 |
+| `fetch_limit` | SMALLINT DEFAULT 100 | 首次拉取上限（防积压）|
 | `is_active` | TINYINT | |
 | `last_fetched_at` | DATETIME NULL | |
 | `last_fetched_uid` | INT UNSIGNED NULL | 最后一个已处理的 IMAP UID，用于精确增量拉取 |
+| `last_error` | TEXT NULL | 最后一次拉取错误信息 |
+| `last_error_at` | DATETIME NULL | |
 | `created_at` | DATETIME | |
 
 ### `subscriptions` — 员工订阅关系（管理员分配）
@@ -147,6 +163,7 @@ MailGate/
 | `priority` | INT | 数字小优先，同 scope 内按此排序 |
 | `created_by` | INT FK → users | 操作者（管理员或员工本人）|
 | `created_at` | DATETIME | |
+| `updated_at` | DATETIME | ON UPDATE CURRENT_TIMESTAMP |
 
 ### `rule_exclusions` — 社員によるグローバルルールのオプトアウト
 
@@ -203,14 +220,18 @@ Step 3 — 兜底
 |---|---|---|
 | `id` | INT PK | |
 | `mailbox_id` | INT FK → monitored_mailboxes | 来自哪个监控邮箱 |
+| `imap_uid` | INT UNSIGNED NULL | IMAP UID，用于精确去重与增量拉取 |
 | `message_id` | VARCHAR(255) NULL | 原始 Message-ID（部分邮件可能无此头）|
 | `from_address` | VARCHAR(255) | |
 | `from_name` | VARCHAR(255) | |
+| `to_address` | TEXT NULL | 收件人列表 |
+| `cc` | TEXT NULL | 抄送列表 |
 | `subject` | VARCHAR(500) | |
 | `body_text` | LONGTEXT | |
 | `body_html` | LONGTEXT | |
 | `received_at` | DATETIME | 邮件原始时间 |
 | `fetched_at` | DATETIME | 系统拉取时间 |
+| UNIQUE KEY | (mailbox_id, imap_uid) | imap_uid 精确去重 |
 | UNIQUE KEY | (mailbox_id, message_id) | message_id 为 NULL 时允许重复，由 imap_uid 兜底去重 |
 
 ### `notifications` — 通知记录（员工 × 邮件）
@@ -227,6 +248,8 @@ Step 3 — 兜底
 | `email_retry_count` | TINYINT DEFAULT 0 | 发送重试次数（超过 3 次不再重试）|
 | `is_trashed` | TINYINT DEFAULT 0 | ゴミ箱フラグ（1=ゴミ箱）|
 | `trashed_at` | DATETIME NULL | ゴミ箱移動日時 |
+| `is_ignored` | TINYINT DEFAULT 0 | 0=通常 1=無視（ルール/手動）|
+| `matched_rule_id` | INT FK → rules NULL | 命中的规则 ID（ON DELETE SET NULL）|
 | UNIQUE KEY | (mail_id, user_id) | 防止重复通知 |
 
 ### `attachments` — 附件
@@ -238,7 +261,21 @@ Step 3 — 兜底
 | `filename` | VARCHAR(255) | |
 | `mime_type` | VARCHAR(100) | |
 | `size` | INT | bytes |
-| `storage_path` | VARCHAR(500) | storage/attachments/ 下的相对路径 |
+| `storage_path` | VARCHAR(500) | storage/attachments/ 下的相对路径（UUID 命名）|
+| `content_id` | VARCHAR(255) NULL | 内联附件的 Content-ID（HTML 正文 cid: 引用）|
+
+### `audit_logs` — 操作审计日志
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INT PK | |
+| `user_id` | INT FK → users NULL | 操作者（ON DELETE SET NULL，保留日志完整性）|
+| `action` | VARCHAR(100) | 操作类型 |
+| `target_type` | VARCHAR(50) NULL | 操作对象类型（如 `user`、`mailbox`）|
+| `target_id` | INT UNSIGNED NULL | 操作对象 ID |
+| `detail` | TEXT NULL | JSON 格式详情 |
+| `ip_address` | VARCHAR(45) NULL | 客户端 IP（支持 IPv6）|
+| `created_at` | DATETIME | |
 
 ### `system_settings` — 系统配置
 
@@ -388,6 +425,7 @@ cron/fetch.php
 | `admin/subscriptions.php` | 分配员工 ↔ 监控邮箱的订阅关系 |
 | `admin/rules.php` | 全局规则管理（per 邮箱）；切换到指定员工可管理其个人规则 |
 | `admin/settings.php` | SMTP 配置、系统通知邮件发件人等 |
+| `admin/audit.php` | 操作审计日志查看 |
 
 ---
 
@@ -440,34 +478,34 @@ cron/fetch.php
 
 ## 开发阶段规划
 
-### Phase 1 — 基础框架
-- [ ] `sql/schema.sql` 数据库初始化
-- [ ] `config/config.php` 配置文件
-- [ ] `Database.php` PDO 封装
-- [ ] `Auth.php` 登录 / Setup Token 首次设密 / 忘记密码重置
+### Phase 1 — 基础框架 ✅
+- [x] `sql/schema.sql` 数据库初始化
+- [x] `config/config.php` 配置文件
+- [x] `Database.php` PDO 封装
+- [x] `Auth.php` 登录 / Setup Token 首次设密 / 忘记密码重置
 
-### Phase 2 — 拉取与通知
-- [ ] `Fetcher.php` IMAP 拉取
-- [ ] `Classifier.php` 规则引擎
-- [ ] `Mailer.php` 邮件发送封装
-- [ ] `Notifier.php` 通知逻辑
-- [ ] `cron/fetch.php` Cron 入口
+### Phase 2 — 拉取与通知 ✅
+- [x] `Fetcher.php` IMAP 拉取
+- [x] `Classifier.php` 规则引擎
+- [x] `Mailer.php` 邮件发送封装
+- [x] `Notifier.php` 通知逻辑
+- [x] `cron/fetch.php` Cron 入口
 
-### Phase 3 — Web 界面（员工）
-- [ ] 登录 / 首次设密页面
-- [ ] Dashboard（通知列表 + 按邮箱分类）
-- [ ] 邮件详情页（HTML 正文隔离 + 附件）
-- [ ] 自定义规则管理
+### Phase 3 — Web 界面（员工）✅
+- [x] 登录 / 首次设密页面
+- [x] Dashboard（通知列表 + 按邮箱分类 + 关键词搜索 + ゴミ箱）
+- [x] 邮件详情页（HTML 正文隔离 + 附件）
+- [x] 自定义规则管理
 
-### Phase 4 — Web 界面（管理员）
-- [ ] 监控邮箱管理
-- [ ] 员工账号管理
-- [ ] 订阅关系分配
-- [ ] 基础规则管理
-- [ ] 系统设置（SMTP）
+### Phase 4 — Web 界面（管理员）✅
+- [x] 监控邮箱管理
+- [x] 员工账号管理
+- [x] 订阅关系分配
+- [x] 基础规则管理
+- [x] 系统设置（SMTP）
 
-### Phase 5 — 完善
-- [ ] 附件下载
-- [ ] 通知邮件去重（同一封邮件不重复通知）
-- [ ] 操作日志
-- [ ] 已读/未读统计 Badge
+### Phase 5 — 完善 ✅
+- [x] 附件下载（`download.php`，storage 目录外 + PHP 鉴权）
+- [x] 通知邮件去重（UNIQUE KEY + INSERT IGNORE 保证幂等）
+- [x] 操作日志（`AuditLog.php` + `admin/audit.php`）
+- [x] 已读/未读统计 Badge（header.php）

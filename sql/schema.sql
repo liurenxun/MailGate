@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS `monitored_mailboxes` (
     `imap_pass_enc`    TEXT            NOT NULL,
     `imap_folder`      VARCHAR(255)    NOT NULL DEFAULT 'INBOX',   -- D8
     `fetch_limit`      SMALLINT UNSIGNED NOT NULL DEFAULT 100,     -- D8: 首次拉取上限
+    `sort_order`       SMALLINT UNSIGNED NOT NULL DEFAULT 0,         -- サイドバー表示順
     `is_active`        TINYINT UNSIGNED NOT NULL DEFAULT 1,
     `last_fetched_at`  DATETIME        NULL DEFAULT NULL,
     `last_fetched_uid` INT UNSIGNED    NULL DEFAULT NULL,          -- 精确增量拉取 (F2/T2)

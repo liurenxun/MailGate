@@ -85,7 +85,7 @@ $mailboxes = Database::fetchAll(
      LEFT  JOIN mails m          ON m.mailbox_id = mb.id
      LEFT  JOIN notifications n  ON n.mail_id = m.id AND n.user_id = ? AND n.is_trashed = 0
      GROUP BY mb.id, mb.label, mb.email_address
-     ORDER BY mb.label ASC',
+     ORDER BY mb.sort_order ASC, mb.label ASC',
     [(int)$user['id'], (int)$user['id']]
 );
 
