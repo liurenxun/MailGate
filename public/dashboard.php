@@ -141,7 +141,7 @@ if (!$viewTrash && !$viewIgnored) {
     // read='' (すべて): is_ignored 条件なし
 }
 if ($filterRule > 0) {
-    // matched_rule_id が NULL の旧レコードもカバーするためリアルタイム SQL マッチを併用
+    // ルールのパターンで全件マッチ（matched_rule_id に依存しない）
     $ruleRow = Database::fetchOne('SELECT * FROM rules WHERE id=?', [$filterRule]);
     if ($ruleRow) {
         // PHP ワイルドカード(*) → SQL LIKE(%) へ変換（% _ をエスケープ）
@@ -149,28 +149,25 @@ if ($filterRule > 0) {
         $lp = str_replace('*', '%', $lp);
         switch ($ruleRow['match_field']) {
             case 'from_address':
-                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND m.from_address LIKE ?))";
-                array_push($params, $filterRule, $lp);
+                $where[]  = 'm.from_address LIKE ?';
+                $params[] = $lp;
                 break;
             case 'from_domain':
-                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND SUBSTRING_INDEX(m.from_address,'@',-1) LIKE ?))";
-                array_push($params, $filterRule, $lp);
+                $where[]  = "SUBSTRING_INDEX(m.from_address,'@',-1) LIKE ?";
+                $params[] = $lp;
                 break;
             case 'subject':
-                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND m.subject LIKE ?))";
-                array_push($params, $filterRule, $lp);
+                $where[]  = 'm.subject LIKE ?';
+                $params[] = $lp;
                 break;
             case 'any':
-                $where[] = "(n.matched_rule_id = ? OR (n.matched_rule_id IS NULL AND (m.from_address LIKE ? OR m.from_name LIKE ? OR m.subject LIKE ?)))";
-                array_push($params, $filterRule, $lp, $lp, $lp);
+                $where[]  = '(m.from_address LIKE ? OR m.from_name LIKE ? OR m.subject LIKE ?)';
+                array_push($params, $lp, $lp, $lp);
                 break;
             default:
                 $where[]  = 'n.matched_rule_id = ?';
                 $params[] = $filterRule;
         }
-    } else {
-        $where[]  = 'n.matched_rule_id = ?';
-        $params[] = $filterRule;
     }
 }
 if ($search !== '') {
@@ -298,6 +295,12 @@ include __DIR__ . '/partials/header.php';
                 ?>
                 <div class="mb-sidebar-group" draggable="true" data-mailbox-id="<?= $mbId ?>">
                     <div class="d-flex align-items-stretch">
+                        <?php if (!empty($mbRules)): ?>
+                        <button class="mb-rule-toggle <?= $mbActive ? 'mb-rule-toggle-active' : '' ?>"
+                                data-target="rules-<?= $mbId ?>">
+                            <i class="bi <?= $mbExpanded ? 'bi-dash' : 'bi-plus' ?>"></i>
+                        </button>
+                        <?php endif; ?>
                         <a href="/dashboard.php<?= buildQuery(['mailbox' => $mbId, 'rule' => '', 'page' => '1']) ?>"
                            draggable="false"
                            class="list-group-item list-group-item-action flex-grow-1
@@ -311,12 +314,6 @@ include __DIR__ . '/partials/header.php';
                                 <span class="badge bg-primary rounded-pill ms-1"><?= (int)$mb['unread_count'] ?></span>
                             <?php endif; ?>
                         </a>
-                        <?php if (!empty($mbRules)): ?>
-                        <button class="mb-rule-toggle <?= $mbActive ? 'mb-rule-toggle-active' : '' ?>"
-                                data-target="rules-<?= $mbId ?>">
-                            <i class="bi <?= $mbExpanded ? 'bi-dash' : 'bi-plus' ?>"></i>
-                        </button>
-                        <?php endif; ?>
                     </div>
                     <?php if (!empty($mbRules)): ?>
                     <div class="mb-rule-collapse" id="rules-<?= $mbId ?>"
