@@ -155,6 +155,67 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ── 今すぐ受信ボタン ─────────────────────────────────────────────
+    const fetchNowBtn = document.getElementById('fetch-now-btn');
+    if (fetchNowBtn) {
+        const fetchLabel   = fetchNowBtn.querySelector('.fetch-label');
+        const fetchIcon    = fetchNowBtn.querySelector('i');
+        const fetchSpinner = fetchNowBtn.querySelector('.spinner-border');
+
+        function resetFetchBtn() {
+            fetchNowBtn.disabled = false;
+            fetchNowBtn.className = 'btn btn-sm btn-outline-primary flex-shrink-0';
+            fetchIcon.classList.remove('d-none');
+            fetchSpinner.classList.add('d-none');
+            fetchLabel.textContent = '受信';
+        }
+
+        fetchNowBtn.addEventListener('click', async () => {
+            fetchNowBtn.disabled = true;
+            fetchIcon.classList.add('d-none');
+            fetchSpinner.classList.remove('d-none');
+            fetchLabel.textContent = '受信中...';
+
+            try {
+                const res = await fetch('/fetch-now.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `csrf_token=${encodeURIComponent(csrfToken)}`,
+                });
+                const data = await res.json();
+
+                fetchSpinner.classList.add('d-none');
+                fetchIcon.classList.remove('d-none');
+
+                if (data.ok) {
+                    fetchNowBtn.className = 'btn btn-sm btn-success flex-shrink-0';
+                    fetchLabel.textContent = data.fetched > 0
+                        ? `${data.fetched}件受信`
+                        : '新着なし';
+                    setTimeout(() => location.reload(), 1500);
+                } else if (data.error === 'busy') {
+                    fetchNowBtn.className = 'btn btn-sm btn-warning flex-shrink-0';
+                    fetchLabel.textContent = 'Cron実行中';
+                    setTimeout(resetFetchBtn, 3000);
+                } else if (data.error === 'rate_limit') {
+                    fetchNowBtn.className = 'btn btn-sm btn-secondary flex-shrink-0';
+                    fetchLabel.textContent = `${data.wait}秒後に再試行`;
+                    setTimeout(resetFetchBtn, data.wait * 1000);
+                } else {
+                    fetchNowBtn.className = 'btn btn-sm btn-danger flex-shrink-0';
+                    fetchLabel.textContent = 'エラー';
+                    setTimeout(resetFetchBtn, 3000);
+                }
+            } catch (_) {
+                fetchSpinner.classList.add('d-none');
+                fetchIcon.classList.remove('d-none');
+                fetchNowBtn.className = 'btn btn-sm btn-danger flex-shrink-0';
+                fetchLabel.textContent = 'エラー';
+                setTimeout(resetFetchBtn, 3000);
+            }
+        });
+    }
+
     // ── 個人ルール編集モーダル populate ─────────────────────────────
     document.querySelectorAll('.rule-edit-btn').forEach(btn => {
         btn.addEventListener('click', () => {

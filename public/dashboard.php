@@ -406,6 +406,15 @@ include __DIR__ . '/partials/header.php';
                     <?php endif; ?>
                 </div>
 
+                <!-- 今すぐ受信ボタン -->
+                <button type="button" id="fetch-now-btn"
+                        class="btn btn-sm btn-outline-primary flex-shrink-0"
+                        title="今すぐ受信（購読中のメールボックスをすぐに取得）">
+                    <span class="spinner-border spinner-border-sm d-none" role="status"></span>
+                    <i class="bi bi-cloud-download"></i>
+                    <span class="fetch-label ms-1">受信</span>
+                </button>
+
                 <!-- キーワード検索 + ソート -->
                 <form method="get" action="/dashboard.php" class="d-flex gap-2 search-form">
                     <?php if ($viewTrash): ?>
