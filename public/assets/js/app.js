@@ -84,6 +84,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // ── メールボックスサイドバー ドラッグ並び替え ────────────────────
+    const mbSidebar = document.querySelector('.mailbox-sidebar .list-group');
+    if (mbSidebar) {
+        let dragSrc = null;
+
+        mbSidebar.querySelectorAll('[draggable="true"]').forEach(item => {
+            item.addEventListener('dragstart', e => {
+                dragSrc = item;
+                e.dataTransfer.effectAllowed = 'move';
+                setTimeout(() => item.classList.add('mb-dragging'), 0);
+            });
+            item.addEventListener('dragend', () => {
+                item.classList.remove('mb-dragging');
+                mbSidebar.querySelectorAll('.mb-drag-over').forEach(el => el.classList.remove('mb-drag-over'));
+                dragSrc = null;
+            });
+            item.addEventListener('dragover', e => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                mbSidebar.querySelectorAll('.mb-drag-over').forEach(el => el.classList.remove('mb-drag-over'));
+                if (dragSrc && item !== dragSrc) item.classList.add('mb-drag-over');
+            });
+            item.addEventListener('dragleave', () => {
+                item.classList.remove('mb-drag-over');
+            });
+            item.addEventListener('drop', e => {
+                e.preventDefault();
+                if (!dragSrc || dragSrc === item) return;
+                item.classList.remove('mb-drag-over');
+                // DOM 並び替え
+                const items = [...mbSidebar.querySelectorAll('[draggable="true"]')];
+                const srcIdx = items.indexOf(dragSrc);
+                const dstIdx = items.indexOf(item);
+                if (srcIdx < dstIdx) {
+                    mbSidebar.insertBefore(dragSrc, item.nextSibling);
+                } else {
+                    mbSidebar.insertBefore(dragSrc, item);
+                }
+                // サーバーへ順番を保存
+                const ids = [...mbSidebar.querySelectorAll('[data-mailbox-id]')]
+                    .map(el => el.dataset.mailboxId);
+                fetch('/dashboard.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `action=reorder_mailboxes&ids=${encodeURIComponent(ids.join(','))}&csrf_token=${encodeURIComponent(csrfToken)}`,
+                });
+            });
+        });
+    }
+
     // ── 個人ルール編集モーダル populate ─────────────────────────────
     document.querySelectorAll('.rule-edit-btn').forEach(btn => {
         btn.addEventListener('click', () => {

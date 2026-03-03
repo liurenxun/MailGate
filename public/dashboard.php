@@ -56,6 +56,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
         Helpers::redirect('/dashboard.php?view=trash');
     }
+    if ($action === 'reorder_mailboxes') {
+        $ids = array_values(array_filter(
+            array_map('intval', explode(',', $_POST['ids'] ?? '')),
+            fn($id) => $id > 0
+        ));
+        if (!empty($ids)) {
+            // 購読しているメールボックス ID のみ許可（不正書き込み防止）
+            $subIds = array_column(
+                Database::fetchAll('SELECT mailbox_id FROM subscriptions WHERE user_id = ?', [$uid]),
+                'mailbox_id'
+            );
+            $ids = array_values(array_filter($ids, fn($id) => in_array($id, $subIds)));
+            Database::query('DELETE FROM user_mailbox_order WHERE user_id = ?', [$uid]);
+            foreach ($ids as $pos => $mbId) {
+                Database::query(
+                    'INSERT INTO user_mailbox_order (user_id, mailbox_id, sort_order) VALUES (?, ?, ?)',
+                    [$uid, $mbId, ($pos + 1) * 10]
+                );
+            }
+        }
+        Helpers::json(['ok' => true]);
+    }
     Helpers::json(['error' => 'Invalid action'], 400);
 }
 
@@ -78,15 +100,16 @@ $orderSQL      = match($sortBy) {
 // ── サイドバー：購読メールボックス一覧 ────────────────────────────
 $mailboxes = Database::fetchAll(
     'SELECT mb.id, mb.label, mb.email_address,
-            COUNT(n.id)                                   AS total_count,
+            COUNT(n.id)                                     AS total_count,
             SUM(CASE WHEN n.is_read = 0 THEN 1 ELSE 0 END) AS unread_count
      FROM monitored_mailboxes mb
-     INNER JOIN subscriptions s ON s.mailbox_id = mb.id AND s.user_id = ?
-     LEFT  JOIN mails m          ON m.mailbox_id = mb.id
-     LEFT  JOIN notifications n  ON n.mail_id = m.id AND n.user_id = ? AND n.is_trashed = 0
+     INNER JOIN subscriptions s   ON s.mailbox_id = mb.id AND s.user_id = ?
+     LEFT  JOIN mails m           ON m.mailbox_id = mb.id
+     LEFT  JOIN notifications n   ON n.mail_id = m.id AND n.user_id = ? AND n.is_trashed = 0
+     LEFT  JOIN user_mailbox_order umo ON umo.mailbox_id = mb.id AND umo.user_id = ?
      GROUP BY mb.id, mb.label, mb.email_address
-     ORDER BY mb.sort_order ASC, mb.label ASC',
-    [(int)$user['id'], (int)$user['id']]
+     ORDER BY COALESCE(umo.sort_order, 99999) ASC, mb.label ASC',
+    [(int)$user['id'], (int)$user['id'], (int)$user['id']]
 );
 
 // ── 通知クエリ（動的 WHERE 構築）──────────────────────────────────
@@ -257,7 +280,9 @@ include __DIR__ . '/partials/header.php';
                 <?php foreach ($mailboxes as $mb): ?>
                 <a href="/dashboard.php<?= buildQuery(['mailbox' => $mb['id'], 'page' => '1']) ?>"
                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center
-                          <?= $filterMailbox === (int)$mb['id'] ? 'active' : '' ?>">
+                          <?= $filterMailbox === (int)$mb['id'] ? 'active' : '' ?>"
+                   draggable="true"
+                   data-mailbox-id="<?= (int)$mb['id'] ?>">
                     <span class="text-truncate" style="max-width:120px"
                           title="<?= Helpers::e($mb['email_address']) ?>">
                         <?= Helpers::e($mb['label']) ?>
