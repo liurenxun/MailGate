@@ -74,7 +74,7 @@ MailGate/
 │   ├── Fetcher.php              # IMAP 拉取邮件
 │   ├── Classifier.php           # 规则匹配引擎
 │   ├── Notifier.php             # 发送通知邮件
-│   ├── Mailer.php               # 邮件发送封装（支持 mail() / SMTP）
+│   ├── Mailer.php               # 邮件发送封装（支持 mail() / SMTP，含 sendReply() Web返信）
 │   ├── AuditLog.php             # 操作审计日志记录
 │   ├── Database.php             # PDO 封装
 │   └── Helpers.php
@@ -87,7 +87,8 @@ MailGate/
 │   └── config.example.php       # 配置模板（入 Git）
 │
 ├── sql/
-│   └── schema.sql               # DB 初始化脚本
+│   ├── schema.sql               # DB 初始化脚本
+│   └── migrate_user_smtp.sql    # 既存DB向けマイグレーション（user_smtp_settings追加）
 │
 ├── storage/
 │   └── attachments/             # 附件存储（在 public 目录外）
@@ -295,7 +296,23 @@ Step 3 — 兜底
 | `key` | VARCHAR(100) PK | |
 | `value` | TEXT | |
 
-> 包含 SMTP 配置：`smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass_enc`, `smtp_from_address`, `smtp_from_name`, `smtp_encryption`, `use_php_mail`（1=用 mail() / 0=用 SMTP）
+> 包含系统通知邮件的 SMTP 配置：`smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass_enc`, `smtp_from_address`, `smtp_from_name`, `smtp_encryption`, `use_php_mail`（`1`=用 mail()/sendmail〈默认〉 / `0`=用 SMTP）
+
+### `user_smtp_settings` — 用户个人发信设置（返信機能用）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `user_id` | INT PK FK → users (CASCADE) | |
+| `smtp_host` | VARCHAR(255) DEFAULT '' | 空 = 未设置（使用 sendmail） |
+| `smtp_port` | SMALLINT DEFAULT 587 | |
+| `smtp_encryption` | ENUM('tls','ssl','none') DEFAULT 'tls' | |
+| `smtp_user` | VARCHAR(255) DEFAULT '' | |
+| `smtp_pass_enc` | TEXT NULL | AES-256-CBC 加密 |
+| `from_address` | VARCHAR(255) DEFAULT '' | 空 = 使用 users.email |
+| `from_name` | VARCHAR(255) DEFAULT '' | 空 = 使用 users.name |
+| `updated_at` | DATETIME | ON UPDATE CURRENT_TIMESTAMP |
+
+> 用户在「アカウント設定 → メール送信設定」中自行配置，可使用任意 SMTP 服务（Gmail 等）。未设置时 `sendReply()` 回落到 sendmail，From 地址使用 `users.email`。
 
 ---
 
@@ -423,9 +440,9 @@ cron/fetch.php
 | 页面 | 功能 |
 |---|---|
 | `dashboard.php` | 通知列表，可按**监控邮箱**分类筛选、已读/未读筛选、关键词搜索、差出人/発信サーバーソート、ゴミ箱（移動・復元・完全削除）；サイドバーのメールボックスをドラッグ＆ドロップで個人の表示順に並び替え可（AJAX保存）|
-| `mail.php?n={nid}` | 邮件详情（校验当前用户是否在该通知记录中），HTML 正文用 iframe sandbox |
+| `mail.php?n={nid}` | 邮件详情（校验当前用户是否在该通知记录中），HTML 正文用 iframe sandbox，Web内返信（Modal形式，支持个人SMTP/sendmail） |
 | `my-rules.php` | 個人ルール管理（購読中の各メールボックスごとに設定）+ システムルール（グローバル）閲覧・適用トグル |
-| `my-settings.php` | 修改通知邮件地址、修改密码 |
+| `my-settings.php` | 修改通知邮件地址、修改密码、配置个人SMTP发信（返信機能用、未設定時はsendmail使用） |
 
 ### 管理员界面
 

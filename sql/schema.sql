@@ -248,7 +248,26 @@ INSERT IGNORE INTO `system_settings` (`key`, `value`) VALUES
     ('smtp_pass_enc',     ''),
     ('smtp_from_address', ''),
     ('smtp_from_name',    'MailGate'),
-    ('use_php_mail',      '0');
+    ('use_php_mail',      '1');  -- デフォルトは mail()（sendmail）を使用
+
+-- ─────────────────────────────────────────────────────────────────
+-- user_smtp_settings — ユーザー個別の送信メール設定（返信機能用）
+-- ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `user_smtp_settings` (
+    `user_id`         INT UNSIGNED  NOT NULL,
+    `smtp_host`       VARCHAR(255)  NOT NULL DEFAULT '',
+    `smtp_port`       SMALLINT UNSIGNED NOT NULL DEFAULT 587,
+    `smtp_encryption` ENUM('tls','ssl','none') NOT NULL DEFAULT 'tls',
+    `smtp_user`       VARCHAR(255)  NOT NULL DEFAULT '',
+    `smtp_pass_enc`   TEXT          NULL DEFAULT NULL,   -- AES-256-CBC 暗号化
+    `from_address`    VARCHAR(255)  NOT NULL DEFAULT '',  -- 空 = users.email を使用
+    `from_name`       VARCHAR(255)  NOT NULL DEFAULT '',  -- 空 = users.name を使用
+    `updated_at`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`),
+    CONSTRAINT `fk_uss_user` FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- ─────────────────────────────────────────────────────────────────
 -- audit_logs — 操作監査ログ（Phase 5）

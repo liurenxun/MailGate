@@ -75,14 +75,58 @@ $attachments = Database::fetchAll(
 
 $pageTitle = $notification['subject'] ?: '（件名なし）';
 
-// ── POST ハンドラ（ゴミ箱移動）────────────────────────────────────
+// ── 返信用データ準備 ──────────────────────────────────────────────
+$replyDate    = date('Y/m/d H:i', strtotime($notification['received_at']));
+$replyFrom    = $notification['from_name']
+    ? $notification['from_name'] . ' <' . $notification['from_address'] . '>'
+    : $notification['from_address'];
+$originalText = $notification['body_text'] ?: strip_tags(str_replace(
+    ['<br>', '<br/>', '<br />', '</p>', '</div>'], "\n", $notification['body_html'] ?? ''
+));
+$quotedLines  = array_map(fn($line) => '> ' . $line, explode("\n", rtrim($originalText)));
+$replySubject = 'Re: ' . ($notification['subject'] ?: '');
+$replyBody    = "\n\n---- 元のメッセージ ----\n"
+    . "差出人: {$replyFrom}\n"
+    . "日時: {$replyDate}\n"
+    . "件名: " . ($notification['subject'] ?: '') . "\n\n"
+    . implode("\n", $quotedLines);
+
+// ユーザーのSMTP設定確認（モーダル表示用）
+$userSmtpRow = Database::fetchOne(
+    'SELECT smtp_host FROM user_smtp_settings WHERE user_id = ?',
+    [(int)$user['id']]
+);
+$userHasSmtp = ($userSmtpRow !== null && $userSmtpRow['smtp_host'] !== '');
+
+// ── POST ハンドラ ─────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') && ($_POST['action'] ?? '') === 'trash') {
+    if (!Auth::verifyCsrf($_POST['csrf_token'] ?? '')) {
+        Helpers::redirect('/mail.php?n=' . $nid);
+    }
+
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'trash') {
         Database::query(
             'UPDATE notifications SET is_trashed=1, trashed_at=NOW() WHERE id=?',
             [$nid]
         );
         Helpers::redirect('/dashboard.php');
+    }
+
+    if ($action === 'reply') {
+        $replyTo       = trim($_POST['reply_to']      ?? '');
+        $replySubjectP = trim($_POST['reply_subject'] ?? '');
+        $replyCCP      = trim($_POST['reply_cc']      ?? '');
+        $replyBodyP    = trim($_POST['reply_body']    ?? '');
+        $inReplyTo     = $notification['message_id'] ?? '';
+
+        if (!filter_var($replyTo, FILTER_VALIDATE_EMAIL) || $replyBodyP === '') {
+            Helpers::redirect('/mail.php?n=' . $nid . '&reply_err=1');
+        }
+
+        $ok = Mailer::sendReply($user, $replyTo, $replySubjectP, $replyBodyP, $replyCCP, $inReplyTo);
+        Helpers::redirect('/mail.php?n=' . $nid . ($ok ? '&replied=1' : '&reply_err=1'));
     }
 }
 
@@ -99,6 +143,17 @@ include __DIR__ . '/partials/header.php';
     </ol>
 </nav>
 
+<?php if (isset($_GET['replied'])): ?>
+<div class="alert alert-success alert-autofade py-2">
+    <i class="bi bi-check-circle"></i> 返信を送信しました。
+</div>
+<?php elseif (isset($_GET['reply_err'])): ?>
+<div class="alert alert-danger alert-autofade py-2">
+    <i class="bi bi-exclamation-triangle"></i> 返信の送信に失敗しました。
+    <a href="/my-settings.php#smtp" class="alert-link">送信設定</a>を確認してください。
+</div>
+<?php endif; ?>
+
 <div class="row g-3">
 
     <!-- ── メインカード ── -->
@@ -106,12 +161,6 @@ include __DIR__ . '/partials/header.php';
         <div class="card border-0 shadow-sm">
 
             <!-- カードヘッダー：件名 + アクション -->
-            <?php
-            // mailto: リンク生成（差出人へ返信、CC に共用メールボックスを追加）
-            $replyHref = 'mailto:' . $notification['from_address']
-                . '?subject=' . rawurlencode('Re: ' . ($notification['subject'] ?: ''))
-                . '&cc=' . $notification['mailbox_email'];
-            ?>
             <div class="card-header bg-white py-3 d-flex align-items-start gap-3 flex-wrap">
                 <div class="flex-grow-1">
                     <h5 class="mb-1">
@@ -137,11 +186,12 @@ include __DIR__ . '/partials/header.php';
                             <i class="bi bi-trash3"></i> 削除
                         </button>
                     </form>
-                    <a href="<?= Helpers::e($replyHref) ?>"
-                       class="btn btn-sm btn-outline-primary"
-                       title="差出人へ返信（CC: <?= Helpers::e($notification['mailbox_email']) ?>）">
+                    <button type="button"
+                            class="btn btn-sm btn-outline-primary"
+                            data-bs-toggle="modal"
+                            data-bs-target="#replyModal">
                         <i class="bi bi-reply"></i> 返信
-                    </a>
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-secondary"
                             onclick="history.length > 1 ? history.back() : location.href='/dashboard.php'">
                         <i class="bi bi-arrow-left"></i> 戻る
@@ -281,6 +331,81 @@ include __DIR__ . '/partials/header.php';
                 <?php endif; ?>
             </div>
 
+        </div>
+    </div>
+</div>
+
+<!-- ── 返信モーダル ── -->
+<div class="modal fade" id="replyModal" tabindex="-1"
+     aria-labelledby="replyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="replyModalLabel">
+                    <i class="bi bi-reply"></i> 返信
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="/mail.php?n=<?= (int)$nid ?>" novalidate>
+                <input type="hidden" name="action"       value="reply">
+                <input type="hidden" name="csrf_token"   value="<?= Helpers::e(Auth::csrfToken()) ?>">
+                <input type="hidden" name="reply_to"     value="<?= Helpers::e($notification['from_address']) ?>">
+                <input type="hidden" name="reply_cc"     value="<?= Helpers::e($notification['mailbox_email']) ?>">
+                <input type="hidden" name="reply_subject" value="<?= Helpers::e($replySubject) ?>">
+
+                <div class="modal-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-6">
+                            <label class="form-label text-muted small mb-1">宛先</label>
+                            <div class="form-control form-control-sm bg-light text-truncate">
+                                <?= Helpers::e(
+                                    $notification['from_name']
+                                        ? $notification['from_name'] . ' <' . $notification['from_address'] . '>'
+                                        : $notification['from_address']
+                                ) ?>
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label text-muted small mb-1">CC</label>
+                            <div class="form-control form-control-sm bg-light text-truncate">
+                                <?= Helpers::e($notification['mailbox_email']) ?>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label text-muted small mb-1">件名</label>
+                            <div class="form-control form-control-sm bg-light">
+                                <?= Helpers::e($replySubject) ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small mb-1">本文</label>
+                        <textarea name="reply_body" class="form-control" rows="12"
+                                  style="font-size:.85rem;font-family:monospace" required
+                        ><?= Helpers::e($replyBody) ?></textarea>
+                    </div>
+
+                    <div class="text-muted small">
+                        <i class="bi bi-info-circle"></i>
+                        送信元: <strong><?= Helpers::e($user['email']) ?></strong>
+                        <?php if ($userHasSmtp): ?>
+                            <span class="text-success ms-1">（個人SMTP設定を使用）</span>
+                        <?php else: ?>
+                            <span class="ms-1">（sendmail を使用）</span>
+                        <?php endif; ?>
+                        — <a href="/my-settings.php#smtp" class="text-muted small">送信設定を変更</a>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm"
+                            data-bs-dismiss="modal">キャンセル</button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-send"></i> 送信する
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

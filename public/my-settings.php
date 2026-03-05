@@ -62,8 +62,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success = 'パスワードを変更しました。';
             }
         }
+
+        // ── メール送信設定保存 ────────────────────────────────────
+        if ($action === 'save_smtp') {
+            $smtpHost    = trim($_POST['smtp_host']      ?? '');
+            $smtpPort    = (int)($_POST['smtp_port']     ?? 587);
+            $smtpEnc     = $_POST['smtp_encryption']     ?? 'tls';
+            $smtpUser    = trim($_POST['smtp_user']      ?? '');
+            $smtpPass    = $_POST['smtp_pass']           ?? '';
+            $fromAddress = trim($_POST['from_address']   ?? '');
+            $fromName    = trim($_POST['from_name']      ?? '');
+
+            $validEnc = ['tls', 'ssl', 'none'];
+            if (!in_array($smtpEnc, $validEnc, true)) {
+                $errors[] = '暗号化方式が無効です。';
+            } elseif ($fromAddress !== '' && !filter_var($fromAddress, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = '送信元アドレスの形式が正しくありません。';
+            } else {
+                $existing = Database::fetchOne(
+                    'SELECT smtp_pass_enc FROM user_smtp_settings WHERE user_id = ?',
+                    [(int)$user['id']]
+                );
+                $passEnc = $existing['smtp_pass_enc'] ?? null;
+                if ($smtpPass !== '') {
+                    $passEnc = Helpers::encrypt($smtpPass);
+                }
+
+                Database::query(
+                    'INSERT INTO user_smtp_settings
+                         (user_id, smtp_host, smtp_port, smtp_encryption, smtp_user, smtp_pass_enc, from_address, from_name)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                         smtp_host=VALUES(smtp_host), smtp_port=VALUES(smtp_port),
+                         smtp_encryption=VALUES(smtp_encryption), smtp_user=VALUES(smtp_user),
+                         smtp_pass_enc=VALUES(smtp_pass_enc), from_address=VALUES(from_address),
+                         from_name=VALUES(from_name)',
+                    [(int)$user['id'], $smtpHost, $smtpPort, $smtpEnc, $smtpUser, $passEnc, $fromAddress, $fromName]
+                );
+                $success = 'メール送信設定を保存しました。';
+            }
+        }
+
+        // ── メール送信設定クリア ──────────────────────────────────
+        if ($action === 'clear_smtp') {
+            Database::query('DELETE FROM user_smtp_settings WHERE user_id = ?', [(int)$user['id']]);
+            $success = 'メール送信設定をクリアしました。sendmail を使用します。';
+        }
+
+        // ── 返信テスト送信 ────────────────────────────────────────
+        if ($action === 'test_reply') {
+            $ok = Mailer::sendReply(
+                $user,
+                $user['email'],
+                'MailGate 返信機能テスト',
+                "これは MailGate からの返信機能テストメールです。\n\n送信日時: " . date('Y-m-d H:i:s')
+            );
+            if ($ok) {
+                $success = "テストメールを {$user['email']} に送信しました。";
+            } else {
+                $errors[] = 'テスト送信に失敗しました。設定を確認してください。';
+            }
+        }
     }
 }
+
+// ── メール送信設定を読み込む ────────────────────────────────────────
+$userSmtp = Database::fetchOne(
+    'SELECT * FROM user_smtp_settings WHERE user_id = ?',
+    [(int)$user['id']]
+);
 
 include __DIR__ . '/partials/header.php';
 ?>
@@ -167,6 +234,129 @@ include __DIR__ . '/partials/header.php';
                 <i class="bi bi-key"></i> パスワードを変更する
             </button>
         </form>
+    </div>
+</div>
+
+<!-- ── メール送信設定（返信機能用） ── -->
+<?php
+$encOptions  = [
+    'tls'  => 'TLS (STARTTLS) — ポート 587',
+    'ssl'  => 'SSL/TLS — ポート 465',
+    'none' => '暗号化なし — ポート 25',
+];
+$hasSmtpPass = !empty($userSmtp['smtp_pass_enc']);
+?>
+<div class="card border-0 shadow-sm mt-4" id="smtp">
+    <div class="card-header bg-white fw-semibold">
+        <i class="bi bi-envelope-gear"></i> メール送信設定
+        <span class="text-muted fw-normal small ms-2">（返信機能で使用）</span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            未設定の場合はサーバーの sendmail を使用します（送信元は <?= Helpers::e($user['email']) ?>）。<br>
+            Gmail など外部 SMTP を使う場合はここで設定してください。
+        </p>
+
+        <form method="post" action="/my-settings.php" novalidate>
+            <input type="hidden" name="action"     value="save_smtp">
+            <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
+
+            <div class="row g-3">
+                <div class="col-md-7">
+                    <label class="form-label">SMTP ホスト</label>
+                    <input type="text" name="smtp_host" class="form-control"
+                           value="<?= Helpers::e($userSmtp['smtp_host'] ?? '') ?>"
+                           placeholder="smtp.gmail.com">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">ポート</label>
+                    <input type="number" name="smtp_port" class="form-control"
+                           value="<?= (int)($userSmtp['smtp_port'] ?? 587) ?>"
+                           min="1" max="65535">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">暗号化</label>
+                    <select name="smtp_encryption" class="form-select">
+                        <?php foreach ($encOptions as $v => $l): ?>
+                        <option value="<?= $v ?>"
+                                <?= ($userSmtp['smtp_encryption'] ?? 'tls') === $v ? 'selected' : '' ?>>
+                            <?= Helpers::e($l) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">SMTP ユーザー名</label>
+                    <input type="text" name="smtp_user" class="form-control"
+                           value="<?= Helpers::e($userSmtp['smtp_user'] ?? '') ?>"
+                           autocomplete="off" placeholder="user@gmail.com">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">
+                        SMTP パスワード
+                        <?php if ($hasSmtpPass): ?>
+                            <span class="text-muted small">（変更する場合のみ入力）</span>
+                        <?php endif; ?>
+                    </label>
+                    <div class="input-group">
+                        <input type="password" name="smtp_pass" class="form-control"
+                               autocomplete="new-password">
+                        <?php if ($hasSmtpPass): ?>
+                        <span class="input-group-text text-success small">
+                            <i class="bi bi-lock-fill me-1"></i>設定済み
+                        </span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">
+                        送信元アドレス
+                        <span class="text-muted small">（空欄 = ログインIDを使用）</span>
+                    </label>
+                    <input type="email" name="from_address" class="form-control"
+                           value="<?= Helpers::e($userSmtp['from_address'] ?? '') ?>"
+                           placeholder="<?= Helpers::e($user['email']) ?>">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">
+                        送信元名
+                        <span class="text-muted small">（空欄 = 氏名を使用）</span>
+                    </label>
+                    <input type="text" name="from_name" class="form-control"
+                           value="<?= Helpers::e($userSmtp['from_name'] ?? '') ?>"
+                           placeholder="<?= Helpers::e($user['name']) ?>">
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2 flex-wrap align-items-center">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save"></i> 保存
+                </button>
+                <?php if ($userSmtp): ?>
+                <button type="button" class="btn btn-outline-secondary"
+                        onclick="document.getElementById('testSmtpForm').submit()">
+                    <i class="bi bi-send"></i> テスト送信
+                </button>
+                <?php endif; ?>
+            </div>
+        </form>
+
+        <?php if ($userSmtp): ?>
+        <form method="post" action="/my-settings.php" class="mt-3" novalidate>
+            <input type="hidden" name="action"     value="clear_smtp">
+            <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
+            <button type="submit" class="btn btn-sm btn-outline-danger"
+                    data-confirm="メール送信設定をクリアしますか？">
+                <i class="bi bi-trash3"></i> 設定をクリア（sendmail に戻す）
+            </button>
+        </form>
+        <form id="testSmtpForm" method="post" action="/my-settings.php" class="d-none">
+            <input type="hidden" name="action"     value="test_reply">
+            <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
+        </form>
+        <?php endif; ?>
     </div>
 </div>
 

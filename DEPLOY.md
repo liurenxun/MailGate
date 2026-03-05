@@ -402,6 +402,23 @@ CREATE TABLE IF NOT EXISTS `user_mailbox_order` (
 
 ---
 
+### user_smtp_settings テーブル追加 + use_php_mail デフォルト修正（Web返信機能）
+
+付属のマイグレーションファイルをそのまま実行することを推奨します：
+
+```bash
+mysql -u mailgate_user -p mailgate \
+  < ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/sql/migrate_user_smtp.sql
+```
+
+または phpMyAdmin で `sql/migrate_user_smtp.sql` をインポートしてください。
+
+> このマイグレーションは2つの処理を行います：
+> 1. ユーザー個別SMTP設定テーブル（`user_smtp_settings`）の作成
+> 2. `system_settings` の `use_php_mail` が `'0'` のままの場合、`'1'`（mail()使用）に修正
+
+---
+
 ## 6. 创建配置文件
 
 ```bash
@@ -545,7 +562,11 @@ rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 
 访问 `https://mailgate.onestep-t.co.jp`，用管理员账号登录后：
 
-### 11-1. 配置 SMTP 发信
+> **SMTP 配置分两类，用途不同：**
+> - **システム設定（管理者）**：系统发出的邮件（账号开通、密码重置、新邮件通知），由管理员统一配置
+> - **アカウント設定（各ユーザー）**：用户在 MailGate 内直接回复邮件时使用，由每位用户自行配置（可选，未配置则使用 sendmail）
+
+### 11-1. 配置系统 SMTP（通知邮件用）
 
 导航到「管理 → システム設定」，填写 SMTP 信息并保存。
 
@@ -559,6 +580,8 @@ rm ~/onestep-t.co.jp/public_html/mailgate.onestep-t.co.jp/setup-admin.php
 | 差出人アドレス | 通知邮件的发件人地址 |
 
 填写后点击「テスト送信」确认发信正常。
+
+> **sendmail を使う場合（SMTP 未設定）：** 「PHP mail() を使用する」にチェックを入れて保存してください。Xserver は sendmail に対応しているため、チェックを入れるだけで通知メールが送信できます。
 
 ### 11-2. 添加监控邮箱
 

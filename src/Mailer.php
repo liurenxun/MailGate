@@ -161,6 +161,180 @@ class Mailer
         return self::send($to, $subject, $body);
     }
 
+    /**
+     * Web返信送信
+     *
+     * ユーザーの個別SMTP設定があればそれを使用、なければ sendmail(mail()) を使用。
+     * From アドレスは user_smtp_settings.from_address → users.email の順で決定。
+     *
+     * @param array  $fromUser    users 表行（id / email / name）
+     * @param string $toAddress   返信先（元メールの差出人）
+     * @param string $subject     件名（通常 "Re: 元件名"）
+     * @param string $bodyText    返信本文（プレーンテキスト）
+     * @param string $ccAddress   CC アドレス（共用メールボックス）
+     * @param string $inReplyTo   元メールの Message-ID（スレッド追跡用、空可）
+     */
+    public static function sendReply(
+        array  $fromUser,
+        string $toAddress,
+        string $subject,
+        string $bodyText,
+        string $ccAddress = '',
+        string $inReplyTo = ''
+    ): bool {
+        $userSmtp    = self::loadUserSmtpSettings((int)$fromUser['id']);
+        $fromAddress = ($userSmtp['from_address'] !== '') ? $userSmtp['from_address'] : $fromUser['email'];
+        $fromName    = ($userSmtp['from_name']    !== '') ? $userSmtp['from_name']    : ($fromUser['name'] ?? '');
+
+        if ($userSmtp['configured']) {
+            return self::sendReplyViaSmtp(
+                $fromAddress, $fromName, $toAddress, $subject,
+                $bodyText, $ccAddress, $inReplyTo, $userSmtp
+            );
+        }
+        return self::sendReplyViaMail(
+            $fromAddress, $fromName, $toAddress, $subject,
+            $bodyText, $ccAddress, $inReplyTo
+        );
+    }
+
+    /** ユーザーのSMTP設定を読み込む（未設定 or smtp_host 空 → configured=false） */
+    private static function loadUserSmtpSettings(int $userId): array
+    {
+        $notConfigured = ['configured' => false, 'from_address' => '', 'from_name' => ''];
+
+        try {
+            $row = Database::fetchOne(
+                'SELECT * FROM user_smtp_settings WHERE user_id = ?',
+                [$userId]
+            );
+        } catch (\Throwable) {
+            return $notConfigured;
+        }
+
+        if ($row === null || $row['smtp_host'] === '') {
+            return array_merge($notConfigured, [
+                'from_address' => $row['from_address'] ?? '',
+                'from_name'    => $row['from_name']    ?? '',
+            ]);
+        }
+
+        $smtpPass = '';
+        if (!empty($row['smtp_pass_enc'])) {
+            $decrypted = Helpers::decrypt($row['smtp_pass_enc']);
+            $smtpPass  = $decrypted !== false ? $decrypted : '';
+        }
+
+        return [
+            'configured'      => true,
+            'smtp_host'       => $row['smtp_host'],
+            'smtp_port'       => (int)$row['smtp_port'],
+            'smtp_encryption' => $row['smtp_encryption'],
+            'smtp_user'       => $row['smtp_user'],
+            'smtp_pass'       => $smtpPass,
+            'from_address'    => $row['from_address'],
+            'from_name'       => $row['from_name'],
+        ];
+    }
+
+    private static function sendReplyViaSmtp(
+        string $fromAddress,
+        string $fromName,
+        string $toAddress,
+        string $subject,
+        string $bodyText,
+        string $ccAddress,
+        string $inReplyTo,
+        array  $userSmtp
+    ): bool {
+        if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+            return self::sendReplyViaMail($fromAddress, $fromName, $toAddress, $subject, $bodyText, $ccAddress, $inReplyTo);
+        }
+
+        try {
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+
+            $mail->isSMTP();
+            $mail->Host       = $userSmtp['smtp_host'];
+            $mail->Port       = $userSmtp['smtp_port'];
+            $mail->SMTPAuth   = !empty($userSmtp['smtp_user']);
+            $mail->Username   = $userSmtp['smtp_user'];
+            $mail->Password   = $userSmtp['smtp_pass'];
+            $mail->SMTPSecure = match(strtolower($userSmtp['smtp_encryption'])) {
+                'ssl'   => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS,
+                'tls'   => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS,
+                default => '',
+            };
+
+            $mail->CharSet  = 'UTF-8';
+            $mail->Encoding = 'base64';
+
+            $mail->setFrom($fromAddress, $fromName);
+            $mail->addReplyTo($fromAddress, $fromName);
+            $mail->addAddress($toAddress);
+            if ($ccAddress !== '') {
+                $mail->addCC($ccAddress);
+            }
+            if ($inReplyTo !== '') {
+                $mail->addCustomHeader('In-Reply-To', $inReplyTo);
+                $mail->addCustomHeader('References', $inReplyTo);
+            }
+
+            $mail->Subject = $subject;
+            $mail->Body    = $bodyText;
+            $mail->isHTML(false);
+
+            $mail->send();
+            return true;
+        } catch (\Throwable $e) {
+            error_log('MailGate sendReply SMTP error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    private static function sendReplyViaMail(
+        string $fromAddress,
+        string $fromName,
+        string $toAddress,
+        string $subject,
+        string $bodyText,
+        string $ccAddress,
+        string $inReplyTo
+    ): bool {
+        $toAddress   = self::sanitizeHeader($toAddress);
+        $subject     = self::sanitizeHeader($subject);
+        $fromAddress = self::sanitizeHeader($fromAddress);
+        $fromName    = self::sanitizeHeader($fromName);
+        $ccAddress   = self::sanitizeHeader($ccAddress);
+
+        $from    = $fromName !== '' ? "{$fromName} <{$fromAddress}>" : $fromAddress;
+        $headers = "From: {$from}\r\n"
+                 . "Reply-To: {$from}\r\n"
+                 . "MIME-Version: 1.0\r\n"
+                 . "Content-Type: text/plain; charset=UTF-8\r\n"
+                 . "Content-Transfer-Encoding: 8bit\r\n";
+
+        if ($ccAddress !== '') {
+            $headers .= "Cc: {$ccAddress}\r\n";
+        }
+        if ($inReplyTo !== '') {
+            $cleanId  = self::sanitizeHeader($inReplyTo);
+            $headers .= "In-Reply-To: {$cleanId}\r\n"
+                     .  "References: {$cleanId}\r\n";
+        }
+
+        // envelope-from を差出人アドレスに設定（sendmail -f）
+        $extraParams = '-f ' . escapeshellarg($fromAddress);
+
+        if (function_exists('mb_send_mail')) {
+            mb_language('Japanese');
+            mb_internal_encoding('UTF-8');
+            return mb_send_mail($toAddress, $subject, $bodyText, $headers, $extraParams);
+        }
+
+        return mail($toAddress, $subject, $bodyText, $headers, $extraParams);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // 内部发送：根据 system_settings 选择 PHPMailer 或 mail()
     // ─────────────────────────────────────────────────────────────
@@ -294,10 +468,11 @@ class Mailer
             $smtpPass  = $decrypted !== false ? $decrypted : '';
         }
 
-        // 若 SMTP 未配置主机，强制使用 mail()
-        $useMail = !empty($kv['use_php_mail'])
+        // use_php_mail フィールドを直接信頼する（'0'は有効な値のため isset で判定）
+        // フィールドが存在しない場合のみ mail() にフォールバック
+        $useMail = isset($kv['use_php_mail'])
             ? (bool)(int)$kv['use_php_mail']
-            : empty($kv['smtp_host']);
+            : true;
 
         return [
             'use_php_mail'      => $useMail,
