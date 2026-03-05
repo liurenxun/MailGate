@@ -45,8 +45,8 @@ class Auth
             return;
         }
 
-        $timeout = (int)(Database::config()['session_timeout'] ?? 1800);
-        ini_set('session.gc_maxlifetime', (string)max($timeout, 1800));
+        $timeout = (int)(Database::config()['session_timeout'] ?? 28800); // デフォルト8時間
+        ini_set('session.gc_maxlifetime', (string)max($timeout, 28800));
 
         $secure = (bool)(Database::config()['session_secure'] ?? true);
 
@@ -151,7 +151,7 @@ class Auth
 
         // セッションタイムアウトチェック（スライディングウィンドウ）
         if (isset($_SESSION['last_active'])) {
-            $timeout = (int)(Database::config()['session_timeout'] ?? 1800);
+            $timeout = (int)(Database::config()['session_timeout'] ?? 28800); // デフォルト8時間
             if (time() - $_SESSION['last_active'] > $timeout) {
                 self::$sessionExpired = true;
                 self::logout();
