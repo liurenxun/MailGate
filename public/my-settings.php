@@ -287,7 +287,7 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
                            <?= $currentMethod === 'mailto' ? 'checked' : '' ?>
                            onchange="toggleSmtpFields()">
                     <label class="form-check-label" for="method_mailto">
-                        メールソフトを起動する（従来通り）
+                        メールソフトを起動する
                     </label>
                 </div>
                 <div class="form-check">
