@@ -180,28 +180,48 @@ class Mailer
         string $subject,
         string $bodyText,
         string $ccAddress = '',
-        string $inReplyTo = ''
+        string $inReplyTo = '',
+        string $fromAddressOverride = '',
+        string $fromNameOverride    = ''
     ): bool {
         $userSmtp    = self::loadUserSmtpSettings((int)$fromUser['id']);
-        $fromAddress = ($userSmtp['from_address'] !== '') ? $userSmtp['from_address'] : $fromUser['email'];
-        $fromName    = ($userSmtp['from_name']    !== '') ? $userSmtp['from_name']    : ($fromUser['name'] ?? '');
+        $fromAddress = $fromAddressOverride !== ''
+            ? $fromAddressOverride
+            : ((!empty($userSmtp['from_address'])) ? $userSmtp['from_address'] : $fromUser['email']);
+        $fromName    = $fromNameOverride !== ''
+            ? $fromNameOverride
+            : ((!empty($userSmtp['from_name'])) ? $userSmtp['from_name'] : ($fromUser['name'] ?? ''));
 
-        if ($userSmtp['configured']) {
-            return self::sendReplyViaSmtp(
+        // configured=false（未設定）の場合は通常 mailto: リンクで処理されるが、
+        // 万一ここに来た場合は false を返す
+        if (!$userSmtp['configured']) {
+            return false;
+        }
+
+        if ($userSmtp['use_mail']) {
+            return self::sendReplyViaMail(
                 $fromAddress, $fromName, $toAddress, $subject,
-                $bodyText, $ccAddress, $inReplyTo, $userSmtp
+                $bodyText, $ccAddress, $inReplyTo
             );
         }
-        return self::sendReplyViaMail(
+
+        return self::sendReplyViaSmtp(
             $fromAddress, $fromName, $toAddress, $subject,
-            $bodyText, $ccAddress, $inReplyTo
+            $bodyText, $ccAddress, $inReplyTo, $userSmtp
         );
     }
 
-    /** ユーザーのSMTP設定を読み込む（未設定 or smtp_host 空 → configured=false） */
+    /**
+     * ユーザーのSMTP設定を読み込む
+     *
+     * 返り値:
+     *   configured = false → レコードなし → 返信はメールソフト（mailto:）に委ねる
+     *   configured = true, use_mail = true  → mail()/sendmail で送信
+     *   configured = true, use_mail = false → 個人 SMTP で送信
+     */
     private static function loadUserSmtpSettings(int $userId): array
     {
-        $notConfigured = ['configured' => false, 'from_address' => '', 'from_name' => ''];
+        $notConfigured = ['configured' => false];
 
         try {
             $row = Database::fetchOne(
@@ -212,11 +232,27 @@ class Mailer
             return $notConfigured;
         }
 
-        if ($row === null || $row['smtp_host'] === '') {
-            return array_merge($notConfigured, [
-                'from_address' => $row['from_address'] ?? '',
-                'from_name'    => $row['from_name']    ?? '',
-            ]);
+        if ($row === null) {
+            return $notConfigured;
+        }
+
+        $fromAddress = $row['from_address'];
+        $fromName    = $row['from_name'];
+
+        // use_mail=1 → mail()/sendmail を使用（SMTPフィールドは不要）
+        if ((int)$row['use_mail'] === 1) {
+            return [
+                'configured'   => true,
+                'use_mail'     => true,
+                'from_address' => $fromAddress,
+                'from_name'    => $fromName,
+            ];
+        }
+
+        // use_mail=0 → 個人 SMTP を使用
+        if ($row['smtp_host'] === '') {
+            // SMTPホスト未入力のまま保存された場合は未設定扱い
+            return $notConfigured;
         }
 
         $smtpPass = '';
@@ -227,13 +263,14 @@ class Mailer
 
         return [
             'configured'      => true,
+            'use_mail'        => false,
             'smtp_host'       => $row['smtp_host'],
             'smtp_port'       => (int)$row['smtp_port'],
             'smtp_encryption' => $row['smtp_encryption'],
             'smtp_user'       => $row['smtp_user'],
             'smtp_pass'       => $smtpPass,
-            'from_address'    => $row['from_address'],
-            'from_name'       => $row['from_name'],
+            'from_address'    => $fromAddress,
+            'from_name'       => $fromName,
         ];
     }
 

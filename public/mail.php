@@ -91,12 +91,25 @@ $replyBody    = "\n\n---- 元のメッセージ ----\n"
     . "件名: " . ($notification['subject'] ?: '') . "\n\n"
     . implode("\n", $quotedLines);
 
-// ユーザーのSMTP設定確認（モーダル表示用）
-$userSmtpRow = Database::fetchOne(
-    'SELECT smtp_host FROM user_smtp_settings WHERE user_id = ?',
+// ユーザーのメール送信設定確認
+$userSmtpRow     = Database::fetchOne(
+    'SELECT use_mail, smtp_host, from_address, from_name FROM user_smtp_settings WHERE user_id = ?',
     [(int)$user['id']]
 );
-$userHasSmtp = ($userSmtpRow !== null && $userSmtpRow['smtp_host'] !== '');
+// 設定あり → モーダル（Web内返信）、設定なし → mailto:（メールソフト起動）
+$userHasMailSetting = ($userSmtpRow !== null);
+$userUseMail        = $userHasMailSetting && (int)$userSmtpRow['use_mail'] === 1;
+$userHasSmtp        = $userHasMailSetting && !$userUseMail && ($userSmtpRow['smtp_host'] ?? '') !== '';
+
+// 差出人の選択肢（ユーザー自身 or 監視メールボックス）
+$userFromAddress = (!empty($userSmtpRow['from_address'])) ? $userSmtpRow['from_address'] : $user['email'];
+$userFromName    = (!empty($userSmtpRow['from_name']))    ? $userSmtpRow['from_name']    : $user['name'];
+
+// mailto: リンク（設定なしの場合のフォールバック）
+$replyHref = 'mailto:' . rawurlencode($notification['from_address'])
+    . '?subject=' . rawurlencode($replySubject)
+    . '&cc='      . rawurlencode($notification['mailbox_email'])
+    . '&body='    . rawurlencode($replyBody);
 
 // ── POST ハンドラ ─────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -115,17 +128,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'reply') {
-        $replyTo       = trim($_POST['reply_to']      ?? '');
-        $replySubjectP = trim($_POST['reply_subject'] ?? '');
-        $replyCCP      = trim($_POST['reply_cc']      ?? '');
-        $replyBodyP    = trim($_POST['reply_body']    ?? '');
+        $replyTo       = trim($_POST['reply_to']           ?? '');
+        $replySubjectP = trim($_POST['reply_subject']      ?? '');
+        $replyCCP      = trim($_POST['reply_cc']           ?? '');
+        $replyBodyP    = trim($_POST['reply_body']         ?? '');
+        $replyFromAddr = trim($_POST['reply_from_address'] ?? '');
         $inReplyTo     = $notification['message_id'] ?? '';
+
+        // 差出人は許可リスト内のアドレスのみ受け付ける
+        $allowedFrom = [
+            $userFromAddress                     => $userFromName,
+            $notification['mailbox_email']       => $notification['mailbox_label'],
+        ];
+        if (!array_key_exists($replyFromAddr, $allowedFrom)) {
+            $replyFromAddr = $userFromAddress;
+        }
+        $replyFromName = $allowedFrom[$replyFromAddr];
 
         if (!filter_var($replyTo, FILTER_VALIDATE_EMAIL) || $replyBodyP === '') {
             Helpers::redirect('/mail.php?n=' . $nid . '&reply_err=1');
         }
 
-        $ok = Mailer::sendReply($user, $replyTo, $replySubjectP, $replyBodyP, $replyCCP, $inReplyTo);
+        $ok = Mailer::sendReply(
+            $user, $replyTo, $replySubjectP, $replyBodyP,
+            $replyCCP, $inReplyTo, $replyFromAddr, $replyFromName
+        );
         Helpers::redirect('/mail.php?n=' . $nid . ($ok ? '&replied=1' : '&reply_err=1'));
     }
 }
@@ -186,12 +213,20 @@ include __DIR__ . '/partials/header.php';
                             <i class="bi bi-trash3"></i> 削除
                         </button>
                     </form>
+                    <?php if ($userHasMailSetting): ?>
                     <button type="button"
                             class="btn btn-sm btn-outline-primary"
                             data-bs-toggle="modal"
                             data-bs-target="#replyModal">
                         <i class="bi bi-reply"></i> 返信
                     </button>
+                    <?php else: ?>
+                    <a href="<?= Helpers::e($replyHref) ?>"
+                       class="btn btn-sm btn-outline-primary"
+                       title="メールソフトで返信（送信設定を行うとここから直接送信できます）">
+                        <i class="bi bi-reply"></i> 返信
+                    </a>
+                    <?php endif; ?>
                     <button type="button" class="btn btn-sm btn-outline-secondary"
                             onclick="history.length > 1 ? history.back() : location.href='/dashboard.php'">
                         <i class="bi bi-arrow-left"></i> 戻る
@@ -355,6 +390,23 @@ include __DIR__ . '/partials/header.php';
 
                 <div class="modal-body">
                     <div class="row g-2 mb-3">
+                        <div class="col-12">
+                            <label class="form-label text-muted small mb-1">差出人</label>
+                            <select name="reply_from_address" class="form-select form-select-sm">
+                                <option value="<?= Helpers::e($userFromAddress) ?>">
+                                    <?= Helpers::e($userFromName) ?>
+                                    &lt;<?= Helpers::e($userFromAddress) ?>&gt;
+                                    （自分）
+                                </option>
+                                <?php if ($userFromAddress !== $notification['mailbox_email']): ?>
+                                <option value="<?= Helpers::e($notification['mailbox_email']) ?>">
+                                    <?= Helpers::e($notification['mailbox_label']) ?>
+                                    &lt;<?= Helpers::e($notification['mailbox_email']) ?>&gt;
+                                    （監視メールボックス）
+                                </option>
+                                <?php endif; ?>
+                            </select>
+                        </div>
                         <div class="col-sm-6">
                             <label class="form-label text-muted small mb-1">宛先</label>
                             <div class="form-control form-control-sm bg-light text-truncate">
@@ -391,8 +443,8 @@ include __DIR__ . '/partials/header.php';
                         送信元: <strong><?= Helpers::e($user['email']) ?></strong>
                         <?php if ($userHasSmtp): ?>
                             <span class="text-success ms-1">（個人SMTP設定を使用）</span>
-                        <?php else: ?>
-                            <span class="ms-1">（sendmail を使用）</span>
+                        <?php elseif ($userUseMail): ?>
+                            <span class="ms-1">（mail()/sendmail を使用）</span>
                         <?php endif; ?>
                         — <a href="/my-settings.php#smtp" class="text-muted small">送信設定を変更</a>
                     </div>

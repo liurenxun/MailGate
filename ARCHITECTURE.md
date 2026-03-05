@@ -87,8 +87,7 @@ MailGate/
 │   └── config.example.php       # 配置模板（入 Git）
 │
 ├── sql/
-│   ├── schema.sql               # DB 初始化脚本
-│   └── migrate_user_smtp.sql    # 既存DB向けマイグレーション（user_smtp_settings追加）
+│   └── schema.sql               # DB 初始化脚本
 │
 ├── storage/
 │   └── attachments/             # 附件存储（在 public 目录外）

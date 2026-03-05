@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS `user_smtp_settings` (
     `smtp_encryption` ENUM('tls','ssl','none') NOT NULL DEFAULT 'tls',
     `smtp_user`       VARCHAR(255)  NOT NULL DEFAULT '',
     `smtp_pass_enc`   TEXT          NULL DEFAULT NULL,   -- AES-256-CBC 暗号化
+    `use_mail`        TINYINT(1)    NOT NULL DEFAULT 0,   -- 1=mail()/sendmail  0=SMTP
     `from_address`    VARCHAR(255)  NOT NULL DEFAULT '',  -- 空 = users.email を使用
     `from_name`       VARCHAR(255)  NOT NULL DEFAULT '',  -- 空 = users.name を使用
     `updated_at`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
