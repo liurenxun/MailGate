@@ -65,7 +65,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // ── メール送信設定保存 ────────────────────────────────────
         if ($action === 'save_smtp') {
-            $useMail     = ($_POST['send_method'] ?? '') === 'mail' ? 1 : 0;
+            $sendMethod = $_POST['send_method'] ?? 'mailto';
+
+            // 「メールソフトを起動する」選択時はレコードを削除して終了
+            if ($sendMethod === 'mailto') {
+                Database::query('DELETE FROM user_smtp_settings WHERE user_id = ?', [(int)$user['id']]);
+                $success  = '設定をクリアしました。返信ボタンはメールソフトを起動します。';
+                $userSmtp = null;
+                // 後続の処理をスキップ
+                goto save_smtp_done;
+            }
+
+            $useMail     = $sendMethod === 'mail' ? 1 : 0;
             $smtpHost    = trim($_POST['smtp_host']      ?? '');
             $smtpPort    = (int)($_POST['smtp_port']     ?? 587);
             $smtpEnc     = $_POST['smtp_encryption']     ?? 'tls';
@@ -102,15 +113,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          from_address=VALUES(from_address), from_name=VALUES(from_name)',
                     [(int)$user['id'], $smtpHost, $smtpPort, $smtpEnc, $smtpUser, $passEnc, $useMail, $fromAddress, $fromName]
                 );
-                $success = 'メール送信設定を保存しました。';
+                $success  = 'メール送信設定を保存しました。';
                 $userSmtp = Database::fetchOne('SELECT * FROM user_smtp_settings WHERE user_id = ?', [(int)$user['id']]);
             }
+            save_smtp_done:
         }
 
-        // ── メール送信設定クリア ──────────────────────────────────
+        // ── メール送信設定クリア（後方互換のため残す） ───────────
         if ($action === 'clear_smtp') {
             Database::query('DELETE FROM user_smtp_settings WHERE user_id = ?', [(int)$user['id']]);
-            $success = 'メール送信設定をクリアしました。sendmail を使用します。';
+            $success = 'メール送信設定をクリアしました。';
         }
 
         // ── 返信テスト送信 ────────────────────────────────────────
@@ -249,7 +261,7 @@ $encOptions   = [
     'none' => '暗号化なし — ポート 25',
 ];
 $hasSmtpPass  = !empty($userSmtp['smtp_pass_enc']);
-$currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp') : '';
+$currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp') : 'mailto';
 ?>
 <div class="card border-0 shadow-sm mt-4" id="smtp">
     <div class="card-header bg-white fw-semibold">
@@ -269,6 +281,15 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
             <!-- 送信方式 -->
             <div class="mb-4">
                 <label class="form-label fw-semibold">送信方式</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="send_method"
+                           id="method_mailto" value="mailto"
+                           <?= $currentMethod === 'mailto' ? 'checked' : '' ?>
+                           onchange="toggleSmtpFields()">
+                    <label class="form-check-label" for="method_mailto">
+                        メールソフトを起動する（従来通り）
+                    </label>
+                </div>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="send_method"
                            id="method_mail" value="mail"
@@ -341,8 +362,8 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
                 </div>
             </div>
 
-            <!-- 送信元情報（両方式共通） -->
-            <div id="fromFields" <?= $currentMethod === '' ? 'style="display:none"' : '' ?>>
+            <!-- 送信元情報（mail / SMTP のみ表示） -->
+            <div id="fromFields" <?= $currentMethod === 'mailto' ? 'style="display:none"' : '' ?>>
                 <hr class="my-3">
                 <p class="small text-muted mb-2">送信元情報</p>
                 <div class="row g-3">
@@ -367,12 +388,11 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
                 </div>
             </div>
 
-            <div class="mt-4 d-flex gap-2 flex-wrap align-items-center" id="saveBtn"
-                 <?= $currentMethod === '' ? 'style="display:none"' : '' ?>>
+            <div class="mt-4 d-flex gap-2 flex-wrap align-items-center">
                 <button type="submit" class="btn btn-primary">
                     <i class="bi bi-save"></i> 保存
                 </button>
-                <?php if ($userSmtp): ?>
+                <?php if ($userSmtp && $currentMethod !== 'mailto'): ?>
                 <button type="button" class="btn btn-outline-secondary"
                         onclick="document.getElementById('testSmtpForm').submit()">
                     <i class="bi bi-send"></i> テスト送信
@@ -382,14 +402,6 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
         </form>
 
         <?php if ($userSmtp): ?>
-        <form method="post" action="/my-settings.php" class="mt-3" novalidate>
-            <input type="hidden" name="action"     value="clear_smtp">
-            <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
-            <button type="submit" class="btn btn-sm btn-outline-danger"
-                    data-confirm="メール送信設定をクリアしますか？戻した場合は返信ボタンがメールソフトを起動します。">
-                <i class="bi bi-trash3"></i> 設定をクリア（メールソフト起動に戻す）
-            </button>
-        </form>
         <form id="testSmtpForm" method="post" action="/my-settings.php" class="d-none">
             <input type="hidden" name="action"     value="test_reply">
             <input type="hidden" name="csrf_token" value="<?= Helpers::e(Auth::csrfToken()) ?>">
@@ -401,9 +413,8 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
 <script>
 function toggleSmtpFields() {
     const method = document.querySelector('input[name="send_method"]:checked')?.value;
-    document.getElementById('smtpFields').style.display = method === 'smtp' ? '' : 'none';
-    document.getElementById('fromFields').style.display = method ? '' : 'none';
-    document.getElementById('saveBtn').style.display    = method ? '' : 'none';
+    document.getElementById('smtpFields').style.display = method === 'smtp'                          ? '' : 'none';
+    document.getElementById('fromFields').style.display = (method === 'mail' || method === 'smtp') ? '' : 'none';
 }
 </script>
 
