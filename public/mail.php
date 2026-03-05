@@ -384,8 +384,6 @@ include __DIR__ . '/partials/header.php';
             <form method="post" action="/mail.php?n=<?= (int)$nid ?>" novalidate>
                 <input type="hidden" name="action"       value="reply">
                 <input type="hidden" name="csrf_token"   value="<?= Helpers::e(Auth::csrfToken()) ?>">
-                <input type="hidden" name="reply_to"     value="<?= Helpers::e($notification['from_address']) ?>">
-                <input type="hidden" name="reply_cc"     value="<?= Helpers::e($notification['mailbox_email']) ?>">
                 <input type="hidden" name="reply_subject" value="<?= Helpers::e($replySubject) ?>">
 
                 <div class="modal-body">
@@ -409,19 +407,16 @@ include __DIR__ . '/partials/header.php';
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label text-muted small mb-1">宛先</label>
-                            <div class="form-control form-control-sm bg-light text-truncate">
-                                <?= Helpers::e(
-                                    $notification['from_name']
-                                        ? $notification['from_name'] . ' <' . $notification['from_address'] . '>'
-                                        : $notification['from_address']
-                                ) ?>
-                            </div>
+                            <input type="email" name="reply_to"
+                                   class="form-control form-control-sm"
+                                   value="<?= Helpers::e($notification['from_address']) ?>"
+                                   required>
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label text-muted small mb-1">CC</label>
-                            <div class="form-control form-control-sm bg-light text-truncate">
-                                <?= Helpers::e($notification['mailbox_email']) ?>
-                            </div>
+                            <input type="text" name="reply_cc"
+                                   class="form-control form-control-sm"
+                                   value="<?= Helpers::e($notification['mailbox_email']) ?>">
                         </div>
                         <div class="col-12">
                             <label class="form-label text-muted small mb-1">件名</label>

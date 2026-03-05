@@ -310,7 +310,11 @@ class Mailer
             $mail->addReplyTo($fromAddress, $fromName);
             $mail->addAddress($toAddress);
             if ($ccAddress !== '') {
-                $mail->addCC($ccAddress);
+                foreach (array_map('trim', explode(',', $ccAddress)) as $cc) {
+                    if ($cc !== '') {
+                        $mail->addCC($cc);
+                    }
+                }
             }
             if ($inReplyTo !== '') {
                 $mail->addCustomHeader('In-Reply-To', $inReplyTo);
