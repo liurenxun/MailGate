@@ -280,7 +280,7 @@ $currentMethod = $userSmtp ? ((int)$userSmtp['use_mail'] === 1 ? 'mail' : 'smtp'
 
             <!-- 送信方式 -->
             <div class="mb-4">
-                <label class="form-label fw-semibold">送信方式</label>
+                <label class="form-label fw-semibold">返信方式</label>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="send_method"
                            id="method_mailto" value="mailto"
