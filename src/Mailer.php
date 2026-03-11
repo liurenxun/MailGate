@@ -173,6 +173,9 @@ class Mailer
      * @param string $bodyText    返信本文（プレーンテキスト）
      * @param string $ccAddress   CC アドレス（共用メールボックス）
      * @param string $inReplyTo   元メールの Message-ID（スレッド追跡用、空可）
+     * @param string $fromAddressOverride 差出人アドレス上書き（空の場合は設定値を使用）
+     * @param string $fromNameOverride    差出人名上書き（空の場合は設定値を使用）
+     * @param array  $attachments 添付ファイル配列 [['tmp_name'=>..., 'name'=>..., 'type'=>...], ...]
      */
     public static function sendReply(
         array  $fromUser,
@@ -182,7 +185,8 @@ class Mailer
         string $ccAddress = '',
         string $inReplyTo = '',
         string $fromAddressOverride = '',
-        string $fromNameOverride    = ''
+        string $fromNameOverride    = '',
+        array  $attachments         = []
     ): bool {
         $userSmtp    = self::loadUserSmtpSettings((int)$fromUser['id']);
         $fromAddress = $fromAddressOverride !== ''
@@ -201,13 +205,13 @@ class Mailer
         if ($userSmtp['use_mail']) {
             return self::sendReplyViaMail(
                 $fromAddress, $fromName, $toAddress, $subject,
-                $bodyText, $ccAddress, $inReplyTo
+                $bodyText, $ccAddress, $inReplyTo, $attachments
             );
         }
 
         return self::sendReplyViaSmtp(
             $fromAddress, $fromName, $toAddress, $subject,
-            $bodyText, $ccAddress, $inReplyTo, $userSmtp
+            $bodyText, $ccAddress, $inReplyTo, $userSmtp, $attachments
         );
     }
 
@@ -282,7 +286,8 @@ class Mailer
         string $bodyText,
         string $ccAddress,
         string $inReplyTo,
-        array  $userSmtp
+        array  $userSmtp,
+        array  $attachments = []
     ): bool {
         if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
             return self::sendReplyViaMail($fromAddress, $fromName, $toAddress, $subject, $bodyText, $ccAddress, $inReplyTo);
@@ -325,6 +330,16 @@ class Mailer
             $mail->Body    = $bodyText;
             $mail->isHTML(false);
 
+            // 添付ファイルを追加
+            foreach ($attachments as $att) {
+                if (!empty($att['tmp_name']) && is_file($att['tmp_name'])) {
+                    $name = isset($att['name']) && $att['name'] !== ''
+                        ? $att['name']
+                        : 'attachment';
+                    $mail->addAttachment($att['tmp_name'], $name, \PHPMailer\PHPMailer\PHPMailer::ENCODING_BASE64, $att['type'] ?? '');
+                }
+            }
+
             $mail->send();
             return true;
         } catch (\Throwable $e) {
@@ -340,8 +355,23 @@ class Mailer
         string $subject,
         string $bodyText,
         string $ccAddress,
-        string $inReplyTo
+        string $inReplyTo,
+        array  $attachments = []
     ): bool {
+        // 有効な添付ファイルがある場合は PHPMailer の isMail() モードを使用
+        $validAttachments = array_filter(
+            $attachments,
+            fn($a) => !empty($a['tmp_name']) && is_file($a['tmp_name'])
+        );
+
+        if (!empty($validAttachments) && class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+            return self::sendReplyViaMailWithAttachments(
+                $fromAddress, $fromName, $toAddress, $subject,
+                $bodyText, $ccAddress, $inReplyTo, array_values($validAttachments)
+            );
+        }
+
+        // 添付なし：従来の raw mail() 方式
         $toAddress   = self::sanitizeHeader($toAddress);
         $subject     = self::sanitizeHeader($subject);
         $fromAddress = self::sanitizeHeader($fromAddress);
@@ -374,6 +404,58 @@ class Mailer
         }
 
         return mail($toAddress, $subject, $bodyText, $headers, $extraParams);
+    }
+
+    /**
+     * PHPMailer の isMail() モードで添付ファイル付きメールを送信（mail() バックエンド使用）
+     */
+    private static function sendReplyViaMailWithAttachments(
+        string $fromAddress,
+        string $fromName,
+        string $toAddress,
+        string $subject,
+        string $bodyText,
+        string $ccAddress,
+        string $inReplyTo,
+        array  $attachments
+    ): bool {
+        try {
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+
+            $mail->isMail();
+            $mail->CharSet  = 'UTF-8';
+            $mail->Encoding = 'base64';
+
+            $mail->setFrom($fromAddress, $fromName);
+            $mail->addReplyTo($fromAddress, $fromName);
+            $mail->addAddress($toAddress);
+            if ($ccAddress !== '') {
+                foreach (array_map('trim', explode(',', $ccAddress)) as $cc) {
+                    if ($cc !== '') {
+                        $mail->addCC($cc);
+                    }
+                }
+            }
+            if ($inReplyTo !== '') {
+                $mail->addCustomHeader('In-Reply-To', $inReplyTo);
+                $mail->addCustomHeader('References', $inReplyTo);
+            }
+
+            $mail->Subject = $subject;
+            $mail->Body    = $bodyText;
+            $mail->isHTML(false);
+
+            foreach ($attachments as $att) {
+                $name = isset($att['name']) && $att['name'] !== '' ? $att['name'] : 'attachment';
+                $mail->addAttachment($att['tmp_name'], $name, \PHPMailer\PHPMailer\PHPMailer::ENCODING_BASE64, $att['type'] ?? '');
+            }
+
+            $mail->send();
+            return true;
+        } catch (\Throwable $e) {
+            error_log('MailGate sendReply mail() error: ' . $e->getMessage());
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────

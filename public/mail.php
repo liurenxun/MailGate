@@ -149,9 +149,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Helpers::redirect('/mail.php?n=' . $nid . '&reply_err=1');
         }
 
+        // 添付ファイル処理（最大5件・各10MB）
+        $uploadedAttachments = [];
+        if (!empty($_FILES['reply_attachments']['name'][0])) {
+            $maxFileSize = 10 * 1024 * 1024; // 10MB
+            $maxFiles    = 5;
+            $fileCount   = min(count($_FILES['reply_attachments']['name']), $maxFiles);
+            for ($i = 0; $i < $fileCount; $i++) {
+                if ($_FILES['reply_attachments']['error'][$i] === UPLOAD_ERR_OK) {
+                    $sz = (int)$_FILES['reply_attachments']['size'][$i];
+                    if ($sz > 0 && $sz <= $maxFileSize) {
+                        $uploadedAttachments[] = [
+                            'tmp_name' => $_FILES['reply_attachments']['tmp_name'][$i],
+                            'name'     => $_FILES['reply_attachments']['name'][$i],
+                            'type'     => $_FILES['reply_attachments']['type'][$i],
+                        ];
+                    }
+                }
+            }
+        }
+
         $ok = Mailer::sendReply(
             $user, $replyTo, $replySubjectP, $replyBodyP,
-            $replyCCP, $inReplyTo, $replyFromAddr, $replyFromName
+            $replyCCP, $inReplyTo, $replyFromAddr, $replyFromName,
+            $uploadedAttachments
         );
         Helpers::redirect('/mail.php?n=' . $nid . ($ok ? '&replied=1' : '&reply_err=1'));
     }
@@ -381,7 +402,8 @@ include __DIR__ . '/partials/header.php';
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="post" action="/mail.php?n=<?= (int)$nid ?>" novalidate>
+            <form method="post" action="/mail.php?n=<?= (int)$nid ?>"
+                  enctype="multipart/form-data" novalidate>
                 <input type="hidden" name="action"       value="reply">
                 <input type="hidden" name="csrf_token"   value="<?= Helpers::e(Auth::csrfToken()) ?>">
                 <input type="hidden" name="reply_subject" value="<?= Helpers::e($replySubject) ?>">
@@ -433,6 +455,22 @@ include __DIR__ . '/partials/header.php';
                         ><?= Helpers::e($replyBody) ?></textarea>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label text-muted small mb-1">
+                            <i class="bi bi-paperclip"></i> 添付ファイル
+                        </label>
+                        <input type="file" name="reply_attachments[]"
+                               class="form-control form-control-sm"
+                               id="replyAttachments"
+                               multiple
+                               accept="*/*">
+                        <div class="form-text text-muted">
+                            最大5件・各ファイル10MBまで
+                        </div>
+                        <!-- 選択済みファイル一覧 -->
+                        <ul id="attachmentList" class="list-unstyled mt-1 mb-0 small text-muted"></ul>
+                    </div>
+
                     <div class="text-muted small">
                         <i class="bi bi-info-circle"></i>
                         送信元: <strong><?= Helpers::e($user['email']) ?></strong>
@@ -456,5 +494,36 @@ include __DIR__ . '/partials/header.php';
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    const input = document.getElementById('replyAttachments');
+    const list  = document.getElementById('attachmentList');
+    if (!input || !list) return;
+
+    input.addEventListener('change', function () {
+        list.innerHTML = '';
+        const MAX = 5;
+        const MB10 = 10 * 1024 * 1024;
+        const files = Array.from(this.files).slice(0, MAX);
+        files.forEach(function (f) {
+            const li = document.createElement('li');
+            const sizeKB = (f.size / 1024).toFixed(1);
+            li.textContent = f.name + ' (' + sizeKB + ' KB)';
+            if (f.size > MB10) {
+                li.classList.add('text-danger');
+                li.textContent += ' — 10MBを超えているため送信されません';
+            }
+            list.appendChild(li);
+        });
+        if (this.files.length > MAX) {
+            const li = document.createElement('li');
+            li.classList.add('text-warning');
+            li.textContent = '※ 先頭5件のみ送信されます';
+            list.appendChild(li);
+        }
+    });
+})();
+</script>
 
 <?php include __DIR__ . '/partials/footer.php'; ?>
